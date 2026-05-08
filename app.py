@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 import openai
 
 st.set_page_config(page_title="AI Movie Recap Tool", layout="centered")
