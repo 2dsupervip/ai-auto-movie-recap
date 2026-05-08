@@ -12,7 +12,7 @@ st.set_page_config(page_title="Golden Key Recap Studio", page_icon="🗝️", la
 st.markdown("""
     <style>
     .main-title { font-size: 38px; font-weight: 800; color: #D4AF37; text-align: center; margin-bottom: 5px; }
-    .sub-title { text-align: center; color: #A0A0A0; font-size: 14px; margin-bottom: 30 : px; font-family: monospace;}
+    .sub-title { text-align: center; color: #A0A0A0; font-size: 14px; margin-bottom: 30px; font-family: monospace;}
     .stButton>button { background-color: #D4AF37; color: #111111; font-weight: 900; border-radius: 8px; width: 100%; transition: 0.3s; }
     .stButton>button:hover { background-color: #FFDF00; color: #000000; transform: scale(1.02); }
     .credit-box { background-color: #262730; border: 1px solid #D4AF37; padding: 10px; border-radius: 10px; text-align: center; color: #D4AF37; font-weight: bold; }
@@ -25,7 +25,7 @@ if 'credits' not in st.session_state:
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🗝️ Golden Key Recap Studio</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Final Level: Video & Audio Integration</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Final Level: Auto-Sync Video & Audio Integration</div>', unsafe_allow_html=True)
 
 col_c1, col_c2, col_c3 = st.columns([1, 2, 1])
 with col_c2:
@@ -38,7 +38,7 @@ async def generate_voice(text, voice_name, output_filename):
     await communicate.save(output_filename)
 
 # --- API Settings ---
-with st.expander("⚙️ API Configuration", expanded=False):
+with st.expander("⚙️ API Configuration (Click to Open)", expanded=False):
     api_key = st.text_input("Google Gemini API Key", type="password")
 
 if api_key:
@@ -63,6 +63,7 @@ if api_key:
         st.markdown("### 🎛️ Studio Settings")
         col1, col2 = st.columns(2)
         with col1:
+            project_name = st.text_input("Project Name", value="Recap_Project")
             voice_gender = st.selectbox("Voice Identity", ["Female (Nilar)", "Male (Thiha)"])
         with col2:
             model_choice = st.selectbox("AI Model", available_models if available_models else ["gemini-1.5-flash-latest"])
@@ -85,19 +86,27 @@ if api_key:
                 # 3. Generate Burmese Voice
                 with st.spinner(">> အဆင့် (၃): Premium Voice-over ဖန်တီးနေသည်..."):
                     clean_script = burmese_script.replace("*", "").replace("#", "").replace("_", "")
+                    clean_script = clean_script.replace("အသံ:", "").replace("Voiceover:", "").replace("Narrator:", "")
                     voice_id = "my-MM-NilarNeural" if voice_gender == "Female (Nilar)" else "my-MM-ThihaNeural"
                     asyncio.run(generate_voice(clean_script, voice_id, "recap_audio.mp3"))
                 
-                # 4. Merge Video and Audio (🌟 New Feature 🌟)
+                # 4. Merge Video and Audio (Auto-Version Checking)
                 with st.spinner(">> အဆင့် (၄): ဗီဒီယိုနှင့် မြန်မာအသံ ပေါင်းစပ်နေသည်... (ခဏစောင့်ပါ)"):
                     try:
                         new_audio = AudioFileClip("recap_audio.mp3")
-                        # ဗီဒီယိုထဲသို့ မြန်မာအသံထည့်သွင်းခြင်း (မူရင်းအသံကို အစားထိုးသည်)
-                        final_video = video_clip.set_audio(new_audio)
+                        
+                        # 🌟 Version အဟောင်း/အသစ် ကို အလိုအလျောက် စစ်ဆေးပြီး အလုပ်လုပ်မည့် အပိုင်း 🌟
+                        if hasattr(video_clip, 'with_audio'):
+                            final_video = video_clip.with_audio(new_audio) # MoviePy v2.0+
+                        else:
+                            final_video = video_clip.set_audio(new_audio)  # MoviePy v1.x
                         
                         # အသံဖိုင်က ဗီဒီယိုထက်ရှည်နေပါက ဗီဒီယိုကို အဆုံးမှာ ရပ်မနေစေရန် ညှိခြင်း
                         if new_audio.duration > video_clip.duration:
-                            final_video = final_video.set_duration(video_clip.duration)
+                            if hasattr(final_video, 'with_duration'):
+                                final_video = final_video.with_duration(video_clip.duration)
+                            else:
+                                final_video = final_video.set_duration(video_clip.duration)
                         
                         final_video.write_videofile("final_recap_video.mp4", codec="libx264", audio_codec="aac", logger=None)
                         
