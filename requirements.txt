@@ -2,5 +2,6 @@ streamlit
 moviepy
 google-generativeai
 edge-tts
-asyncio
 yt-dlp
+gtts
+proglog
