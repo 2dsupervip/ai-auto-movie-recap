@@ -42,7 +42,7 @@ if uploaded_file is not None:
             with st.spinner("အဆင့် (၂): Gemini ဖြင့် နားထောင်ပြီး မြန်မာလို ဘာသာပြန်နေသည်..."):
                 # အသံဖိုင်ကို Gemini ဆီသို့ တိုက်ရိုက်ပို့ခြင်း
                 audio_file = genai.upload_file(path="temp_audio.mp3")
-                model = genai.GenerativeModel("gemini-1.5-flash-latest")
+                model = genai.GenerativeModel("gemini-1.5-pro")
                 
                 # Prompt ပေးခြင်း
                 prompt = "You are a professional Burmese movie recap script writer. Listen to this English audio and write an engaging Burmese movie recap script based on it."
