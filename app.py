@@ -23,7 +23,7 @@ def extract_audio(video_path, audio_path):
 if api_key:
     genai.configure(api_key=api_key)
     
-    # 🌟 လက်ရှိသုံးလို့ရတဲ့ AI Model များကို ဆွဲထုတ်ခြင်း 🌟
+    # လက်ရှိသုံးလို့ရတဲ့ AI Model များကို ဆွဲထုတ်ခြင်း
     available_models = []
     try:
         for m in genai.list_models():
@@ -35,7 +35,7 @@ if api_key:
     if available_models:
         # Dropdown ဖြင့် Model ရွေးချယ်ခိုင်းခြင်း
         st.success("API Key ချိတ်ဆက်မှု အောင်မြင်ပါသည်။")
-        selected_model = st.selectbox("🤖 အသုံးပြုမည့် AI Model ကို ရွေးချယ်ပါ (flash သို့မဟုတ် pro ပါသည်ကို ရွေးပါ)", available_models)
+        selected_model = st.selectbox("🤖 အသုံးပြုမည့် AI Model ကို ရွေးချယ်ပါ (flash ပါသည်ကို ရွေးပါ)", available_models)
         
         uploaded_file = st.file_uploader("Video ဖိုင် တင်လိုက်ပါ (English Recap)", type=["mp4", "mov"])
 
@@ -54,19 +54,27 @@ if api_key:
                     # အသံဖိုင်ကို Gemini ဆီသို့ တိုက်ရိုက်ပို့ခြင်း
                     audio_file = genai.upload_file(path="temp_audio.mp3")
                     
-                    # 🌟 User ရွေးချယ်ထားသော Model ကို အသုံးပြုခြင်း 🌟
+                    # User ရွေးချယ်ထားသော Model ကို အသုံးပြုခြင်း
                     model = genai.GenerativeModel(selected_model)
                     
-                    # Prompt ပေးခြင်း
-                    prompt = "You are a professional Burmese movie recap script writer. Listen to this English audio and write an engaging Burmese movie recap script based on it."
+                    # 🌟 ပြင်ဆင်ချက် (၁): Script ကို တိုတိုတုတ်တုတ်ဖြစ်စေရန် ပြင်းထန်သော Prompt ပေးခြင်း 🌟
+                    prompt = """
+                    You are a professional Burmese movie recap script writer. 
+                    Listen to this English audio and write an engaging Burmese movie recap script based on it. 
+                    CRITICAL RULE: The Burmese script MUST be very concise and short. Make sure it takes the exact same amount of time to read as the original English audio. Do not add unnecessary words.
+                    """
                     response = model.generate_content([prompt, audio_file])
                     burmese_script = response.text
                     
                     st.text_area("Burmese Recap Script", burmese_script, height=200)
                 
                 with st.spinner("အဆင့် (၃): မြန်မာအသံ (Voice-over) ဖန်တီးနေသည်..."):
-                    # မြန်မာစာကို အသံပြောင်းခြင်း
-                    tts = gTTS(text=burmese_script, lang='my')
+                    # 🌟 ပြင်ဆင်ချက် (၂): အသံမထွက်ခင် သင်္ကေတများနှင့် မလိုလားအပ်သော စကားလုံးများ ရှင်းလင်းခြင်း 🌟
+                    clean_script = burmese_script.replace("*", "").replace("#", "").replace("_", "")
+                    clean_script = clean_script.replace("အသံ:", "").replace("Voiceover:", "").replace("Narrator:", "")
+                    
+                    # သန့်စင်ပြီးသား စာသားကိုသာ အသံပြောင်းခြင်း
+                    tts = gTTS(text=clean_script, lang='my')
                     tts.save("burmese_voice.mp3")
                     
                     st.audio("burmese_voice.mp3")
