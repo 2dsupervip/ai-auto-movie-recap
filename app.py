@@ -2,7 +2,8 @@ import streamlit as st
 import os
 from moviepy import VideoFileClip
 import google.generativeai as genai
-from gtts import gTTS
+import edge_tts
+import asyncio
 
 # Page Configuration
 st.set_page_config(page_title="Golden Key Recap Studio", page_icon="🗝️", layout="centered")
@@ -19,7 +20,7 @@ st.markdown("""
 
 # --- Initial Session State for Credits ---
 if 'credits' not in st.session_state:
-    st.session_state.credits = 231 # အစမ်း Credit ပေးထားခြင်း
+    st.session_state.credits = 231 
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🗝️ Golden Key Recap Studio</div>', unsafe_allow_html=True)
@@ -31,6 +32,11 @@ with col_c2:
     st.markdown(f'<div class="credit-box">💳 Available Credits: {st.session_state.credits}</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+# --- Async Function for Edge TTS (Free Azure Voices) ---
+async def generate_voice(text, voice_name, output_filename):
+    communicate = edge_tts.Communicate(text, voice_name)
+    await communicate.save(output_filename)
 
 # --- API Settings ---
 with st.expander("⚙️ API Configuration", expanded=False):
@@ -59,26 +65,19 @@ if api_key:
         col1, col2 = st.columns(2)
         
         with col1:
-            voice_gender = st.selectbox("Voice Identity", ["Female (Nilar)", "Male (Thiha)"])
-            # Speed Selection
-            voice_speed = st.select_slider("Audio Speed", options=["Slow", "Normal"], value="Normal")
+            voice_gender = st.selectbox("Voice Identity (Premium)", ["Female (Nilar)", "Male (Thiha)"])
             
         with col2:
             model_choice = st.selectbox("AI Model", available_models if available_models else ["gemini-1.5-flash"])
-            # Emotion with Burmese Translation
-            emotion = st.selectbox("Select Emotion", [
-                "Narrative (ပုံမှန်ပြောပြခြင်း)", 
-                "Calm (အေးအေးဆေးဆေး)", 
-                "Energetic (တက်ကြွသော)", 
-                "Dramatic (စိတ်လှုပ်ရှားဖွယ်)"
-            ])
+
+        st.info("💡 ဤ App သည် ကတ်မလိုသော Free Edge-TTS (Azure Neural) ကို အသုံးပြုထားသဖြင့် Nilar/Thiha အသံများ သဘာဝကျကျ ထွက်ပေါ်မည်ဖြစ်ပါသည်။")
 
         # --- Test Audio Button ---
-        if st.button("🔈 Test Sample Audio (အစမ်းနားထောင်ရန်)"):
-            test_text = "မင်္ဂလာပါ၊ Golden Key Studio ကနေ ကြိုဆိုပါတယ်။ အခုကတော့ အသံစမ်းသပ်မှု ဖြစ်ပါတယ်။"
-            is_slow = True if voice_speed == "Slow" else False
-            test_tts = gTTS(text=test_text, lang='my', slow=is_slow)
-            test_tts.save("test_voice.mp3")
+        if st.button("🔈 Test Premium Audio (အစမ်းနားထောင်ရန်)"):
+            test_text = "မင်္ဂလာပါ၊ Golden Key Studio ကနေ ကြိုဆိုပါတယ်။ ကျွန်မကတော့ နီလာပါ။ ကျွန်တော်ကတော့ သီဟပါ။"
+            voice_id = "my-MM-NilarNeural" if voice_gender == "Female (Nilar)" else "my-MM-ThihaNeural"
+            
+            asyncio.run(generate_voice(test_text, voice_id, "test_voice.mp3"))
             st.audio("test_voice.mp3")
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -86,32 +85,34 @@ if api_key:
         # --- Main Processing ---
         if st.button("🚀 Generate Golden Recap"):
             if st.session_state.credits > 0:
-                with st.spinner("Processing..."):
-                    # 1. Extract Audio
+                with st.spinner(">> အဆင့် (၁): အသံခွဲထုတ်နေသည်..."):
                     video = VideoFileClip("temp_video.mp4")
                     video.audio.write_audiofile("temp_audio.mp3")
                     
-                    # 2. AI Script Generation
+                with st.spinner(">> အဆင့် (၂): AI Script ရေးသားနေသည်..."):
                     audio_file = genai.upload_file(path="temp_audio.mp3")
                     model = genai.GenerativeModel(model_choice)
-                    prompt = "Write a very concise Burmese movie recap for this audio."
+                    prompt = "Write a very concise Burmese movie recap for this audio. Make sure it takes the exact same amount of time to read as the original English audio."
                     response = model.generate_content([prompt, audio_file])
                     burmese_script = response.text
                     
-                    # 3. Clean and TTS
+                with st.spinner(">> အဆင့် (၃): Premium Voice-over ဖန်တီးနေသည်..."):
                     clean_script = burmese_script.replace("*", "").replace("#", "").replace("_", "")
-                    is_slow = True if voice_speed == "Slow" else False
-                    tts = gTTS(text=clean_script, lang='my', slow=is_slow)
-                    tts.save("burmese_voice.mp3")
+                    clean_script = clean_script.replace("အသံ:", "").replace("Voiceover:", "").replace("Narrator:", "")
                     
-                    # Deduct Credit
+                    # Nilar သို့မဟုတ် Thiha အသံ ရွေးချယ်ခြင်း
+                    voice_id = "my-MM-NilarNeural" if voice_gender == "Female (Nilar)" else "my-MM-ThihaNeural"
+                    
+                    # Edge TTS ဖြင့် အသံဖန်တီးခြင်း
+                    asyncio.run(generate_voice(clean_script, voice_id, "burmese_voice.mp3"))
+                    
                     st.session_state.credits -= 1
                     
-                    st.success(f"🎉 Done! 1 Credit deducted. Remaining: {st.session_state.credits}")
+                    st.success(f"🎉 အောင်မြင်ပါပြီ! Remaining Credits: {st.session_state.credits}")
                     st.text_area("Generated Script", burmese_script, height=150)
                     st.audio("burmese_voice.mp3")
             else:
-                st.error("Insufficient credits! Please top up.")
+                st.error("Insufficient credits!")
 
 else:
     st.info("👈 Please enter API Key in Configuration to start.")
