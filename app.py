@@ -47,7 +47,6 @@ def download_youtube_video(url, output_path="temp_video.mp4"):
         'outtmpl': output_path,
         'quiet': True,
         'nocheckcertificate': True,
-        # 403 Error ရှောင်ရန် Android Client အဖြစ် ဟန်ဆောင်ခြင်း
         'extractor_args': {'youtube': {'player_client': ['android']}}
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -56,7 +55,7 @@ def download_youtube_video(url, output_path="temp_video.mp4"):
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🗝️ Golden Key Recap Studio</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Smart Video Processing Engine</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Smart Video Processing Engine (Auto-Version Supported)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # WIZARD STEP 1: Setup & Media Input
@@ -124,8 +123,20 @@ if st.session_state.step == 1:
 
             with st.spinner(">> AI မှ ဇာတ်ညွှန်း ရေးသားနေပါသည်..."):
                 try:
+                    # 🌟 Auto-Detect AI Model Version စနစ် 🌟
+                    available_models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                    
+                    if "gemini-1.5-flash" in available_models:
+                        best_model = "gemini-1.5-flash"
+                    elif "gemini-1.5-pro" in available_models:
+                        best_model = "gemini-1.5-pro"
+                    elif available_models:
+                        best_model = available_models[0] # ရှိသမျှထဲက အလုပ်လုပ်မည့်တစ်ခုကို အလိုအလျောက် ရွေးမည်
+                    else:
+                        best_model = "gemini-1.5-flash" # Fallback
+                        
+                    model = genai.GenerativeModel(best_model)
                     audio_file = genai.upload_file(path="temp_audio.mp3")
-                    model = genai.GenerativeModel("gemini-1.5-flash-latest")
                     
                     if st.session_state.is_long_video:
                         duration_mins = target_duration.split()[0]
@@ -203,6 +214,7 @@ elif st.session_state.step == 3:
                     
                     speed_factor = video_clip.duration / new_audio.duration
                     
+                    # Auto-Detect MoviePy Version
                     if hasattr(video_clip, 'with_effects'):
                         import moviepy.video.fx as vfx
                         synced_video = video_clip.with_effects([vfx.MultiplySpeed(speed_factor)])
@@ -211,6 +223,7 @@ elif st.session_state.step == 3:
                         synced_video = video_clip.speedx(factor=speed_factor)
                         final_video = synced_video.set_duration(new_audio.duration).set_audio(new_audio)
                     
+                    # Memory Optimization
                     if final_video.h > 720:
                         if hasattr(final_video, 'resized'): final_video = final_video.resized(height=720)
                         else: final_video = final_video.resize(height=720)
