@@ -14,7 +14,7 @@ st.markdown("""
     .main-title {
         font-size: 40px;
         font-weight: 800;
-        color: #D4AF37; /* Premium Gold Color */
+        color: #D4AF37;
         text-align: center;
         margin-bottom: 5px;
         letter-spacing: 1.5px;
@@ -58,56 +58,70 @@ st.markdown('<div class="sub-title">Data-Driven AI Video Translation & Dubbing</
 with st.expander("⚙️ API Configuration (စတင်ရန် နှိပ်ပါ)", expanded=True):
     api_key = st.text_input("Google Gemini API Key", type="password", help="သင်၏ အခမဲ့ Gemini Key ကို ဤနေရာတွင် ထည့်ပါ။")
 
-# --- Main Video Upload Section ---
-st.markdown("### 🎬 Media Upload")
-uploaded_file = st.file_uploader("Drop your English Recap Video here (MP4/MOV)", type=["mp4", "mov"], label_visibility="collapsed")
+# API Key ထည့်ပြီးမှ အောက်ပိုင်းကို ဆက်လုပ်ပါမည်
+if api_key:
+    genai.configure(api_key=api_key)
+    
+    # 🌟 လက်ရှိသုံးလို့ရတဲ့ AI Model များကို အလိုအလျောက် ဆွဲထုတ်ခြင်း (Error ကင်းစင်စေရန်) 🌟
+    available_models = []
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                # နာမည်ထဲက 'models/' ဆိုတာကို ဖြုတ်ပြီး အလွယ်တကူရွေးနိုင်အောင် လုပ်ပေးခြင်း
+                model_name = m.name.replace("models/", "")
+                available_models.append(model_name)
+    except Exception as e:
+        st.error(f"API Error: {e}")
 
-if uploaded_file is not None and api_key:
-    # ယာယီသိမ်းမည့်နေရာ
-    with open("temp_video.mp4", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    st.video("temp_video.mp4")
-    
-    # --- Studio Settings (၂ ကွက်ခွဲ၍ လှပအောင် စီစဉ်ခြင်း) ---
-    st.markdown("### 🎛️ Studio Settings")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        project_name = st.text_input("Project Name", value="Recap_Project_01")
-        voice_gender = st.selectbox("Voice Identity", ["Female (Nilar)", "Male (Thiha)"])
-    with col2:
-        model_choice = st.selectbox("AI Model", ["gemini-1.5-flash-latest", "gemini-1.5-pro"])
-        emotion = st.selectbox("Emotion", ["Narrative", "Calm", "Energetic", "Dramatic"])
-    
-    st.markdown("<br>", unsafe_allow_html=True) # Space လေးခြားရန်
-    
-    # --- Processing Action ---
-    if st.button("🚀 Generate Golden Recap", use_container_width=True):
-        genai.configure(api_key=api_key)
-        
-        with st.spinner(">> အဆင့် (၁): အသံဒေတာ ခွဲထုတ်နေသည်..."):
-            video = VideoFileClip("temp_video.mp4")
-            video.audio.write_audiofile("temp_audio.mp3")
+    if available_models:
+        # --- Main Video Upload Section ---
+        st.markdown("### 🎬 Media Upload")
+        uploaded_file = st.file_uploader("Drop your English Recap Video here (MP4/MOV)", type=["mp4", "mov"], label_visibility="collapsed")
+
+        if uploaded_file is not None:
+            # ယာယီသိမ်းမည့်နေရာ
+            with open("temp_video.mp4", "wb") as f:
+                f.write(uploaded_file.getbuffer())
             
-        with st.spinner(f">> အဆင့် (၂): {model_choice} ဖြင့် Script ရေးသားနေသည်..."):
-            audio_file = genai.upload_file(path="temp_audio.mp3")
-            model = genai.GenerativeModel(model_choice)
+            st.video("temp_video.mp4")
             
-            prompt = """You are a professional Burmese movie recap script writer. Listen to this English audio and write an engaging Burmese movie recap script based on it. CRITICAL RULE: The Burmese script MUST be very concise and short. Make sure it takes the exact same amount of time to read as the original English audio."""
-            response = model.generate_content([prompt, audio_file])
-            burmese_script = response.text
+            # --- Studio Settings ---
+            st.markdown("### 🎛️ Studio Settings")
             
-            # Text area တွင် ရလဒ်ပြခြင်း
-            st.text_area("📝 Master Script Generated:", burmese_script, height=200)
+            col1, col2 = st.columns(2)
+            with col1:
+                project_name = st.text_input("Project Name", value="Recap_Project_01")
+                voice_gender = st.selectbox("Voice Identity", ["Female (Nilar)", "Male (Thiha)"])
+            with col2:
+                # 🌟 ရရှိနိုင်သော Model များကိုသာ Dropdown တွင် ပြပေးမည် 🌟
+                model_choice = st.selectbox("AI Model", available_models)
+                emotion = st.selectbox("Emotion", ["Narrative", "Calm", "Energetic", "Dramatic"])
             
-        with st.spinner(">> အဆင့် (၃): မြန်မာ Voice-over ဖန်တီးနေသည်..."):
-            clean_script = burmese_script.replace("*", "").replace("#", "").replace("_", "")
-            clean_script = clean_script.replace("အသံ:", "").replace("Voiceover:", "").replace("Narrator:", "")
+            st.markdown("<br>", unsafe_allow_html=True) # Space လေးခြားရန်
             
-            # မှတ်ချက်: လက်ရှိ gTTS သည် Free ဖြစ်သဖြင့် Gender/Emotion မရွေးနိုင်သေးပါ။ နောက်ပိုင်း Azure ဖြင့် အဆင့်မြှင့်ပါမည်။
-            tts = gTTS(text=clean_script, lang='my')
-            tts.save("burmese_voice.mp3")
-            
-            st.success("🎉 အားလုံးအောင်မြင်စွာ ပြီးစီးပါပြီ!")
-            st.audio("burmese_voice.mp3")
+            # --- Processing Action ---
+            if st.button("🚀 Generate Golden Recap", use_container_width=True):
+                with st.spinner(">> အဆင့် (၁): အသံဒေတာ ခွဲထုတ်နေသည်..."):
+                    video = VideoFileClip("temp_video.mp4")
+                    video.audio.write_audiofile("temp_audio.mp3")
+                    
+                with st.spinner(f">> အဆင့် (၂): {model_choice} ဖြင့် Script ရေးသားနေသည်..."):
+                    audio_file = genai.upload_file(path="temp_audio.mp3")
+                    model = genai.GenerativeModel(model_choice)
+                    
+                    prompt = "You are a professional Burmese movie recap script writer. Listen to this English audio and write an engaging Burmese movie recap script based on it. CRITICAL RULE: The Burmese script MUST be very concise and short. Make sure it takes the exact same amount of time to read as the original English audio."
+                    response = model.generate_content([prompt, audio_file])
+                    burmese_script = response.text
+                    
+                    # Text area တွင် ရလဒ်ပြခြင်း
+                    st.text_area("📝 Master Script Generated:", burmese_script, height=200)
+                    
+                with st.spinner(">> အဆင့် (၃): မြန်မာ Voice-over ဖန်တီးနေသည်..."):
+                    clean_script = burmese_script.replace("*", "").replace("#", "").replace("_", "")
+                    clean_script = clean_script.replace("အသံ:", "").replace("Voiceover:", "").replace("Narrator:", "")
+                    
+                    tts = gTTS(text=clean_script, lang='my')
+                    tts.save("burmese_voice.mp3")
+                    
+                    st.success("🎉 အားလုံးအောင်မြင်စွာ ပြီးစီးပါပြီ!")
+                    st.audio("burmese_voice.mp3")
