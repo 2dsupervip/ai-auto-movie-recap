@@ -3,3 +3,4 @@ moviepy
 google-generativeai
 edge-tts
 asyncio
+yt-dlp
