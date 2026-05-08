@@ -90,28 +90,48 @@ if api_key:
                     voice_id = "my-MM-NilarNeural" if voice_gender == "Female (Nilar)" else "my-MM-ThihaNeural"
                     asyncio.run(generate_voice(clean_script, voice_id, "recap_audio.mp3"))
                 
-                # 4. Merge Video and Audio (Auto-Version Checking)
-                with st.spinner(">> အဆင့် (၄): ဗီဒီယိုနှင့် မြန်မာအသံ ပေါင်းစပ်နေသည်... (ခဏစောင့်ပါ)"):
+                                # 4. Merge Video and Audio (Auto-Sync Video Speed)
+                with st.spinner(">> အဆင့် (၄): ဗီဒီယိုနှင့် မြန်မာအသံကို အလိုအလျောက် အချိန်ညှိနေသည်... (ခဏစောင့်ပါ)"):
                     try:
                         new_audio = AudioFileClip("recap_audio.mp3")
+                        audio_duration = new_audio.duration
+                        video_duration = video_clip.duration
                         
-                        # 🌟 Version အဟောင်း/အသစ် ကို အလိုအလျောက် စစ်ဆေးပြီး အလုပ်လုပ်မည့် အပိုင်း 🌟
-                        if hasattr(video_clip, 'with_audio'):
-                            final_video = video_clip.with_audio(new_audio) # MoviePy v2.0+
+                        # 🌟 (၁) အချိန်ကိုက် ညှိရန် Speed Factor တွက်ချက်ခြင်း 🌟
+                        # ဥပမာ - ဗီဒီယိုက ၂ မိနစ် (120s)၊ အသံက ၂ မိနစ်ခွဲ (150s) ဆိုလျှင်
+                        # Factor = 120 / 150 = 0.8 (ဗီဒီယိုကို အလိုအလျောက် Slow-motion လုပ်ပေးမည်)
+                        speed_factor = video_duration / audio_duration
+                        
+                        # 🌟 (၂) ဗီဒီယိုကို အသံအရှည်အတိုင်း ဆွဲဆန့်ခြင်း သို့မဟုတ် ချုံ့ခြင်း 🌟
+                        # (Moviepy Version အဟောင်း/အသစ် အကုန်လုံးတွင် Error မတက်စေရန် fl_time ကိုအသုံးပြုထားသည်)
+                        synced_video = video_clip.fl_time(lambda t: t * speed_factor)
+                        
+                        # Version အလိုက် အလုပ်လုပ်စေရန် စစ်ဆေးခြင်း
+                        if hasattr(synced_video, 'with_duration'):
+                            synced_video = synced_video.with_duration(audio_duration)
+                            final_video = synced_video.with_audio(new_audio)
                         else:
-                            final_video = video_clip.set_audio(new_audio)  # MoviePy v1.x
-                        
-                        # အသံဖိုင်က ဗီဒီယိုထက်ရှည်နေပါက ဗီဒီယိုကို အဆုံးမှာ ရပ်မနေစေရန် ညှိခြင်း
-                        if new_audio.duration > video_clip.duration:
-                            if hasattr(final_video, 'with_duration'):
-                                final_video = final_video.with_duration(video_clip.duration)
-                            else:
-                                final_video = final_video.set_duration(video_clip.duration)
+                            synced_video = synced_video.set_duration(audio_duration)
+                            final_video = synced_video.set_audio(new_audio)
                         
                         final_video.write_videofile("final_recap_video.mp4", codec="libx264", audio_codec="aac", logger=None)
                         
                         st.session_state.credits -= 1
-                        st.success("🎉 အောင်မြင်စွာ ပေါင်းစပ်ပြီးပါပြီ!")
+                        st.success("🎉 အောင်မြင်စွာ အချိန်ကိုက် ပေါင်းစပ်ပြီးပါပြီ! (Auto-Synced)")
+                        
+                        # ရလဒ်ပြသခြင်း
+                        st.video("final_recap_video.mp4")
+                        
+                        # ဒေါင်းလုဒ်ခလုတ်
+                        with open("final_recap_video.mp4", "rb") as file:
+                            st.download_button(
+                                label="📥 Download Auto-Synced Recap Video",
+                                data=file,
+                                file_name=f"GoldenKey_{project_name}_Synced.mp4",
+                                mime="video/mp4"
+                            )
+                    except Exception as e:
+                        st.error(f"ပေါင်းစပ်ရာတွင် အမှားအယွင်းရှိပါသည်: {e}")
                         
                         # ရလဒ်ပြသခြင်း
                         st.video("final_recap_video.mp4")
