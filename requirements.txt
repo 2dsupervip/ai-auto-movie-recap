@@ -1,3 +1,4 @@
+streamlit
 moviepy
 openai==0.28.0
 openai-whisper
