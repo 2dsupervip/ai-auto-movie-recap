@@ -36,7 +36,7 @@ if 'is_long_video' not in st.session_state:
 def next_step(): st.session_state.step += 1
 def prev_step(): st.session_state.step -= 1
 
-# --- Helper Functions (Updated with SRT Generation) ---
+# --- Helper Functions (Auto-Version Compatible) ---
 async def generate_voice_and_srt(text, voice_name, audio_filename, srt_filename):
     communicate = edge_tts.Communicate(text, voice_name)
     submaker = edge_tts.SubMaker()
@@ -46,11 +46,21 @@ async def generate_voice_and_srt(text, voice_name, audio_filename, srt_filename)
             if chunk["type"] == "audio":
                 file.write(chunk["data"])
             elif chunk["type"] == "WordBoundary":
-                submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+                # 🌟 edge-tts Version အလိုက် အလိုအလျောက် စစ်ဆေးခြင်း 🌟
+                if hasattr(submaker, 'feed'):
+                    submaker.feed(chunk) # Version အသစ်များအတွက်
+                elif hasattr(submaker, 'create_sub'):
+                    submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"]) # Version အဟောင်းများအတွက်
                 
     # Save Subtitle SRT File
     with open(srt_filename, "w", encoding="utf-8") as file:
-        file.write(submaker.generate_subs())
+        # 🌟 SRT ထုတ်လုပ်မှုအတွက် Auto-Version Checking 🌟
+        if hasattr(submaker, 'get_srt'):
+            file.write(submaker.get_srt())
+        elif hasattr(submaker, 'generate_subs'):
+            file.write(submaker.generate_subs())
+        else:
+            file.write(str(submaker)) # Fallback အနေဖြင့် သုံးရန်
 
 def download_youtube_video(url, output_path="temp_video.mp4"):
     ydl_opts = {
@@ -199,8 +209,9 @@ elif st.session_state.step == 3:
                     with open("final_voice.mp3", "rb") as f:
                         st.download_button("🎙️ Audio Only", data=f, file_name="Recap_Audio.mp3", mime="audio/mp3")
                 with col_dl3:
-                    with open("subtitles.srt", "rb") as f:
-                        st.download_button("📝 Subtitle (SRT)", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
+                    if os.path.exists("subtitles.srt"):
+                        with open("subtitles.srt", "rb") as f:
+                            st.download_button("📝 Subtitle (SRT)", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
 
             # -----------------------------------------------------
             # LOGIC 2: ဗီဒီယို ၅ မိနစ်အောက်လျှင် (Auto-Merge & Copyright Protection)
@@ -217,13 +228,17 @@ elif st.session_state.step == 3:
                         import moviepy.video.fx as vfx
                         synced_video = video_clip.with_effects([vfx.MultiplySpeed(speed_factor), vfx.MirrorX()])
                     else:
+                        import moviepy.video.fx.all as vfx
                         synced_video = video_clip.speedx(factor=speed_factor).fx(vfx.mirror_x)
                     
                     w, h = synced_video.size
                     
                     # 🌟 2. Subtitle Cover-up (Crop Strategy) 🌟
                     # မူရင်းစာတန်းထိုးများကို ဖျောက်ရန် အောက်ခြေ ၁၅% ကို ဖြတ်ထုတ်၍ Zoom ချဲ့ပါမည်
-                    synced_video = synced_video.crop(x1=w*0.05, y1=h*0.05, x2=w*0.95, y2=h*0.85)
+                    if hasattr(synced_video, 'cropped'): # MoviePy 2.0+
+                        synced_video = synced_video.cropped(x1=w*0.05, y1=h*0.05, x2=w*0.95, y2=h*0.85)
+                    else: # MoviePy 1.x
+                        synced_video = synced_video.crop(x1=w*0.05, y1=h*0.05, x2=w*0.95, y2=h*0.85)
                     
                     # အသံနှင့် အချိန်ကိုက် ညှိခြင်း
                     if hasattr(synced_video, 'with_duration'):
@@ -252,8 +267,9 @@ elif st.session_state.step == 3:
                         with open("final_merged.mp4", "rb") as f:
                             st.download_button("📥 Download Safe Video", data=f, file_name="GoldenKey_Safe.mp4", mime="video/mp4")
                     with col_f2:
-                        with open("subtitles.srt", "rb") as f:
-                            st.download_button("📝 Download SRT File", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
+                        if os.path.exists("subtitles.srt"):
+                            with open("subtitles.srt", "rb") as f:
+                                st.download_button("📝 Download SRT File", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
                             
                     st.info("💡 CapCut ထဲသို့ အထက်ပါ ဗီဒီယိုနှင့် SRT ဖိုင်ကို တပြိုင်နက် ဆွဲထည့်ပြီး စာတန်းထိုး အလန်းစားများ ထည့်သွင်းနိုင်ပါသည်။")
             
