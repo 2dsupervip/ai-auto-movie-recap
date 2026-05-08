@@ -36,10 +36,21 @@ if 'is_long_video' not in st.session_state:
 def next_step(): st.session_state.step += 1
 def prev_step(): st.session_state.step -= 1
 
-# --- Helper Functions ---
-async def generate_voice(text, voice_name, output_filename):
+# --- Helper Functions (Updated with SRT Generation) ---
+async def generate_voice_and_srt(text, voice_name, audio_filename, srt_filename):
     communicate = edge_tts.Communicate(text, voice_name)
-    await communicate.save(output_filename)
+    submaker = edge_tts.SubMaker()
+    
+    with open(audio_filename, "wb") as file:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+                
+    # Save Subtitle SRT File
+    with open(srt_filename, "w", encoding="utf-8") as file:
+        file.write(submaker.generate_subs())
 
 def download_youtube_video(url, output_path="temp_video.mp4"):
     ydl_opts = {
@@ -55,7 +66,7 @@ def download_youtube_video(url, output_path="temp_video.mp4"):
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🗝️ Golden Key Recap Studio</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Smart Video Processing Engine (Auto-Version Supported)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Smart Engine (Auto-Version, Copyright Avoidance & SRT Setup)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # WIZARD STEP 1: Setup & Media Input
@@ -71,14 +82,11 @@ if st.session_state.step == 1:
     st.markdown("### 📥 Choose Media Source")
     input_method = st.radio("တင်မည့်ပုံစံ ရွေးချယ်ပါ", ["Upload Video (အကြံပြုသည်)", "YouTube Link (Error တက်နိုင်သည်)"], horizontal=True)
     
-    video_ready = False
-    
     if input_method == "Upload Video (အကြံပြုသည်)":
         uploaded_file = st.file_uploader("ဗီဒီယိုဖိုင် ရွေးပါ", type=["mp4", "mov"])
         if uploaded_file:
             with open("temp_video.mp4", "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            video_ready = True
             st.success("ဗီဒီယို အောင်မြင်စွာ တင်ပြီးပါပြီ။")
             
     else:
@@ -89,10 +97,9 @@ if st.session_state.step == 1:
                     try:
                         if os.path.exists("temp_video.mp4"): os.remove("temp_video.mp4")
                         download_youtube_video(youtube_url)
-                        video_ready = True
                         st.success("YouTube ဗီဒီယို ဆွဲယူခြင်း အောင်မြင်ပါသည်။")
                     except Exception as e:
-                        st.error("YouTube မှ တိုက်ရိုက်ဆွဲယူခွင့် ပိတ်ထားပါသည်။ အထက်ပါ 'Upload Video' စနစ်ကို ပြောင်းလဲအသုံးပြုပါ။")
+                        st.error("YouTube မှ ဆွဲယူခွင့် ပိတ်ထားပါသည်။ အထက်ပါ 'Upload Video' စနစ်ကို ပြောင်းလဲအသုံးပြုပါ။")
 
     st.markdown("### 🎛️ Voice Settings")
     voice_gender = st.selectbox("Premium Voice", ["Female (Nilar)", "Male (Thiha)"])
@@ -102,20 +109,19 @@ if st.session_state.step == 1:
         if not st.session_state.api_key:
             st.error("⚠️ API Key အရင်ထည့်ပါ။")
         elif not os.path.exists("temp_video.mp4"):
-            st.error("⚠️ ဗီဒီယို အရင်တင်ရန် သို့မဟုတ် ဒေါင်းလုဒ်ဆွဲရန် လိုအပ်ပါသည်။")
+            st.error("⚠️ ဗီဒီယို အရင်တင်ရန် လိုအပ်ပါသည်။")
         else:
             with st.spinner(">> ဗီဒီယိုကြာချိန်ကို စစ်ဆေးနေပါသည်..."):
                 video_clip = VideoFileClip("temp_video.mp4")
                 duration = video_clip.duration
                 st.session_state.video_duration = duration
                 
-                # ၅ မိနစ် (စက္ကန့် ၃၀၀) ကျော်မကျော် စစ်ဆေးခြင်း
                 if duration > 300:
                     st.session_state.is_long_video = True
-                    st.warning("⚠️ ၅ မိနစ်ကျော်သော ဗီဒီယိုဖြစ်သဖြင့် Auto-Merge မလုပ်ဘဲ အနှစ်ချုပ် (Summarize) သာ ပြုလုပ်ပေးပါမည်။")
+                    st.warning("⚠️ ၅ မိနစ်ကျော်သော ဗီဒီယိုဖြစ်သဖြင့် အနှစ်ချုပ် (Summarize) သာ ပြုလုပ်ပေးပါမည်။")
                 else:
                     st.session_state.is_long_video = False
-                    st.info("💡 ၅ မိနစ်အောက် ဗီဒီယိုဖြစ်သဖြင့် အသံနှင့် ရုပ်ကို အလိုအလျောက် ပေါင်းစပ်ပေးပါမည်။")
+                    st.info("💡 ၅ မိနစ်အောက်ဖြစ်သဖြင့် အသံနှင့်ရုပ် ပေါင်းစပ်ပေးပါမည်။")
                 
                 video_clip.audio.write_audiofile("temp_audio.mp3", logger=None)
                 video_clip.close()
@@ -123,17 +129,8 @@ if st.session_state.step == 1:
 
             with st.spinner(">> AI မှ ဇာတ်ညွှန်း ရေးသားနေပါသည်..."):
                 try:
-                    # 🌟 Auto-Detect AI Model Version စနစ် 🌟
                     available_models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    
-                    if "gemini-1.5-flash" in available_models:
-                        best_model = "gemini-1.5-flash"
-                    elif "gemini-1.5-pro" in available_models:
-                        best_model = "gemini-1.5-pro"
-                    elif available_models:
-                        best_model = available_models[0] # ရှိသမျှထဲက အလုပ်လုပ်မည့်တစ်ခုကို အလိုအလျောက် ရွေးမည်
-                    else:
-                        best_model = "gemini-1.5-flash" # Fallback
+                    best_model = "gemini-1.5-flash" if "gemini-1.5-flash" in available_models else (available_models[0] if available_models else "gemini-1.5-pro")
                         
                     model = genai.GenerativeModel(best_model)
                     audio_file = genai.upload_file(path="temp_audio.mp3")
@@ -158,11 +155,7 @@ if st.session_state.step == 1:
 # ==========================================
 elif st.session_state.step == 2:
     st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
-    
-    if st.session_state.is_long_video:
-        st.info("📝 ဤသည်မှာ ၁၅ မိနစ်စာ ဗီဒီယိုမှ ၃-၅ မိနစ်စာ အနှစ်ချုပ်ထားသော ဇာတ်ညွှန်းဖြစ်သည်။")
-    else:
-        st.info("📝 ဤသည်မှာ မူရင်းဗီဒီယိုအရှည်အတိုင်း အချိန်ကိုက် ဘာသာပြန်ထားသော ဇာတ်ညွှန်းဖြစ်သည်။")
+    st.info("📝 အောက်ပါ ဇာတ်ညွှန်းအား မိမိစိတ်ကြိုက် ပြင်ဆင်နိုင်ပါသည်။")
 
     edited_script = st.text_area("Edit Burmese Script:", value=st.session_state.draft_script, height=300)
     
@@ -183,50 +176,66 @@ elif st.session_state.step == 2:
 elif st.session_state.step == 3:
     st.markdown('<div class="step-header">Step 3: Final Output</div>', unsafe_allow_html=True)
     
-    with st.spinner(">> Premium Voice-over ဖန်တီးနေပါသည်..."):
+    with st.spinner(">> Premium Voice နှင့် စာတန်းထိုး (SRT) ဖန်တီးနေပါသည်..."):
         try:
             clean_script = st.session_state.final_script.replace("*", "").replace("#", "")
             voice_id = "my-MM-NilarNeural" if "Nilar" in st.session_state.voice_gender else "my-MM-ThihaNeural"
-            asyncio.run(generate_voice(clean_script, voice_id, "final_voice.mp3"))
+            
+            # အသံဖိုင်နှင့် အချိန်ကိုက် Subtitle SRT ဖိုင်ကို တစ်ပြိုင်နက် ထုတ်လုပ်ခြင်း
+            asyncio.run(generate_voice_and_srt(clean_script, voice_id, "final_voice.mp3", "subtitles.srt"))
             
             # -----------------------------------------------------
-            # LOGIC 1: ဗီဒီယို ၅ မိနစ်ကျော်လျှင် (Audio/Video သီးသန့်ပြမည်)
+            # LOGIC 1: ဗီဒီယို ၅ မိနစ်ကျော်လျှင်
             # -----------------------------------------------------
             if st.session_state.is_long_video:
-                st.success("🎉 အနှစ်ချုပ် အသံဖိုင် ဖန်တီးပြီးပါပြီ! (VN/CapCut တွင် သွားရောက် ဖြတ်ဆက်ပါ)")
+                st.success("🎉 အနှစ်ချုပ် အသံဖိုင်နှင့် စာတန်းထိုး ဖန်တီးပြီးပါပြီ!")
                 st.audio("final_voice.mp3")
                 
-                col_dl1, col_dl2 = st.columns(2)
+                col_dl1, col_dl2, col_dl3 = st.columns(3)
                 with col_dl1:
-                    with open("temp_video.mp4", "rb") as file:
-                        st.download_button("🎥 Download Raw Video", data=file, file_name="Raw_Video.mp4", mime="video/mp4")
+                    with open("temp_video.mp4", "rb") as f:
+                        st.download_button("🎥 Raw Video", data=f, file_name="Raw_Video.mp4", mime="video/mp4")
                 with col_dl2:
-                    with open("final_voice.mp3", "rb") as file:
-                        st.download_button("🎙️ Download Audio Only", data=file, file_name="Recap_Audio.mp3", mime="audio/mp3")
+                    with open("final_voice.mp3", "rb") as f:
+                        st.download_button("🎙️ Audio Only", data=f, file_name="Recap_Audio.mp3", mime="audio/mp3")
+                with col_dl3:
+                    with open("subtitles.srt", "rb") as f:
+                        st.download_button("📝 Subtitle (SRT)", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
 
             # -----------------------------------------------------
-            # LOGIC 2: ဗီဒီယို ၅ မိနစ်အောက်လျှင် (Auto-Merge လုပ်ပေးမည်)
+            # LOGIC 2: ဗီဒီယို ၅ မိနစ်အောက်လျှင် (Auto-Merge & Copyright Protection)
             # -----------------------------------------------------
             else:
-                with st.spinner(">> ဗီဒီယိုနှင့် အသံကို အလိုအလျောက် ပေါင်းစပ်နေပါသည် (Auto-Merge)..."):
+                with st.spinner(">> Copyright ရှောင်ကွင်းခြင်းနှင့် ဗီဒီယိုပေါင်းစပ်ခြင်း..."):
                     video_clip = VideoFileClip("temp_video.mp4")
                     new_audio = AudioFileClip("final_voice.mp3")
                     
                     speed_factor = video_clip.duration / new_audio.duration
                     
-                    # Auto-Detect MoviePy Version
+                    # 🌟 1. Copyright Avoidance (Mirror Effect) 🌟
                     if hasattr(video_clip, 'with_effects'):
                         import moviepy.video.fx as vfx
-                        synced_video = video_clip.with_effects([vfx.MultiplySpeed(speed_factor)])
+                        synced_video = video_clip.with_effects([vfx.MultiplySpeed(speed_factor), vfx.MirrorX()])
+                    else:
+                        synced_video = video_clip.speedx(factor=speed_factor).fx(vfx.mirror_x)
+                    
+                    w, h = synced_video.size
+                    
+                    # 🌟 2. Subtitle Cover-up (Crop Strategy) 🌟
+                    # မူရင်းစာတန်းထိုးများကို ဖျောက်ရန် အောက်ခြေ ၁၅% ကို ဖြတ်ထုတ်၍ Zoom ချဲ့ပါမည်
+                    synced_video = synced_video.crop(x1=w*0.05, y1=h*0.05, x2=w*0.95, y2=h*0.85)
+                    
+                    # အသံနှင့် အချိန်ကိုက် ညှိခြင်း
+                    if hasattr(synced_video, 'with_duration'):
                         final_video = synced_video.with_duration(new_audio.duration).with_audio(new_audio)
                     else:
-                        synced_video = video_clip.speedx(factor=speed_factor)
                         final_video = synced_video.set_duration(new_audio.duration).set_audio(new_audio)
                     
-                    # Memory Optimization
-                    if final_video.h > 720:
-                        if hasattr(final_video, 'resized'): final_video = final_video.resized(height=720)
-                        else: final_video = final_video.resize(height=720)
+                    # Memory Optimization & Resizing back to Standard 720p
+                    if hasattr(final_video, 'resized'):
+                        final_video = final_video.resized(height=720)
+                    else:
+                        final_video = final_video.resize(height=720)
                     
                     final_video.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", preset="ultrafast", threads=2, logger=None)
                     
@@ -235,11 +244,18 @@ elif st.session_state.step == 3:
                     final_video.close()
                     gc.collect()
                     
-                    st.success("🎉 အောင်မြင်စွာ ပေါင်းစပ်ပြီးပါပြီ!")
+                    st.success("🎉 Copyright-Safe ဗီဒီယို အောင်မြင်စွာ ပေါင်းစပ်ပြီးပါပြီ!")
                     st.video("final_merged.mp4")
                     
-                    with open("final_merged.mp4", "rb") as file:
-                        st.download_button("📥 Download Final Video", data=file, file_name="GoldenKey_Merged.mp4", mime="video/mp4")
+                    col_f1, col_f2 = st.columns(2)
+                    with col_f1:
+                        with open("final_merged.mp4", "rb") as f:
+                            st.download_button("📥 Download Safe Video", data=f, file_name="GoldenKey_Safe.mp4", mime="video/mp4")
+                    with col_f2:
+                        with open("subtitles.srt", "rb") as f:
+                            st.download_button("📝 Download SRT File", data=f, file_name="GoldenKey_Subs.srt", mime="text/plain")
+                            
+                    st.info("💡 CapCut ထဲသို့ အထက်ပါ ဗီဒီယိုနှင့် SRT ဖိုင်ကို တပြိုင်နက် ဆွဲထည့်ပြီး စာတန်းထိုး အလန်းစားများ ထည့်သွင်းနိုင်ပါသည်။")
             
             st.markdown("---")
             if st.button("🔄 Start New Project"):
