@@ -78,7 +78,7 @@ def reset_project():
     st.session_state.step = 1
     st.rerun()
 
-# --- 🌟 SMART PROMPT WITH CODE BLOCK INSTRUCTION 🌟 ---
+# --- 🌟 SMART PROMPT LOGIC 🌟 ---
 def get_prompt_with_limit(duration_seconds, tone):
     word_limit = int((duration_seconds / 60) * 140)
     return f"""
@@ -145,7 +145,6 @@ if st.session_state.step == 1:
         workflow = st.radio("🔄 လုပ်ငန်းစဉ်", ["Auto (Gemini)", "Manual (Groq)"])
         script_tone = st.selectbox("📝 Tone", ["Narrative", "Calm", "Energetic", "Dramatic"])
     with col_t:
-        # 🌟 Voice Engine & Gender ယှဉ်လျက် ထားခြင်း 🌟
         engine_col, gender_col = st.columns(2)
         tts_engine = engine_col.selectbox("🎙️ Voice Engine", ["Premium (TTS)", "Standard (gTTS)"])
         gender = gender_col.selectbox("👤 Gender", ["Male", "Female"])
@@ -170,7 +169,11 @@ if st.session_state.step == 1:
                         with open("temp_audio.mp3", "rb") as f:
                             transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
                         limit = int((st.session_state.video_duration/60)*140)
-                        st.session_state.ready_made_prompt = f"Summarize into Burmese storytelling script (~{limit} words):\n\n{transcription}"
+                        
+                        # 🌟 FULLY UPDATED MANUAL PROMPT FOR ONE-CLICK COPY IN GEMINI WEB 🌟
+                        st.session_state.ready_made_prompt = f"Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.\nTONE: {tone_map[script_tone]}\nLENGTH: ~{limit} Burmese words.\nCRITICAL: Return the final Burmese script ONLY inside a markdown code block (```text ... 
+```) so I can copy it with one click. Do not include any extra text.\n\nTranscription:\n{transcription}"
+                        
                         st.session_state.workflow_mode = "Manual"
                     
                     st.session_state.tts_engine, st.session_state.gender, st.session_state.use_bgm = tts_engine, gender, use_bgm
@@ -184,13 +187,12 @@ if st.session_state.step == 1:
 elif st.session_state.step == 2:
     st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
     if st.session_state.workflow_mode == "Auto":
-        # 🌟 Gemini Result ကို Code Block ဖြင့် ပြသခြင်း 🌟
         st.info("Copy ခလုတ်ကို နှိပ်၍ ဇာတ်ညွှန်းကို ကူးယူနိုင်ပါသည်။")
-        # Gemini မှ ``` ထဲတွင် ထည့်ပေးလိုက်သော စာသားကို သန့်စင်ပြီး ပြသခြင်း
-        display_text = st.session_state.draft_script.replace("```", "").replace("markdown", "").strip()
+        display_text = st.session_state.draft_script.replace("```text", "").replace("```markdown", "").replace("```", "").strip()
         st.code(display_text, language="markdown")
         edited_script = st.text_area("✍️ လိုအပ်ပါက ပြင်ဆင်ပါ:", value=display_text, height=300)
     else:
+        st.info("💡 အောက်ပါစာသားကို Copy ယူပြီး Gemini တွင် ထည့်ပါ။ Gemini မှထွက်လာသော Code Block ကို Copy ပြန်ယူပြီး အောက်တွင် Paste လုပ်ပါ။")
         st.code(st.session_state.ready_made_prompt, language="text")
         edited_script = st.text_area("✍️ Paste translated script here:", height=300)
 
@@ -198,7 +200,13 @@ elif st.session_state.step == 2:
     if c1.button("⬅️ Back"): st.session_state.step = 1; st.rerun()
     if c2.button("🎙️ Next: Render"):
         if not edited_script.strip(): st.error("စာသားထည့်ပါ")
-        else: st.session_state.final_script = edited_script; next_step(); st.rerun()
+        else: 
+            # 🌟 Clean up markdown block if user pastes the whole block back 🌟
+            clean_edited = edited_script.replace("```text", "").replace("
+```markdown", "").replace("```", "").strip()
+            st.session_state.final_script = clean_edited
+            next_step()
+            st.rerun()
 
 # ==========================================
 # WIZARD STEP 3: Rendering
@@ -207,13 +215,11 @@ elif st.session_state.step == 3:
     st.markdown('<div class="step-header">Step 3: Final Output</div>', unsafe_allow_html=True)
     with st.spinner("Rendering..."):
         try:
-            # Voice Gen
             if "Premium" in st.session_state.tts_engine:
                 voice = "my-MM-ThihaNeural" if st.session_state.gender == "Male" else "my-MM-NilarNeural"
                 asyncio.run(edge_tts.Communicate(st.session_state.final_script, voice).save("final_voice.mp3"))
             else: gTTS(text=st.session_state.final_script, lang='my').save("final_voice.mp3")
             
-            # Sync & Effects
             video, audio = VideoFileClip("temp_video.mp4"), AudioFileClip("final_voice.mp3")
             import moviepy.video.fx.all as vfx
             import moviepy.audio.fx.all as afx
