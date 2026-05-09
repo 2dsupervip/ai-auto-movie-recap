@@ -1,4 +1,4 @@
-# 🌟 PIL Error ဖြေရှင်းရန် Auto-Fix (အခြားအရာများ မခေါ်မီ ထိပ်ဆုံးတွင် ထားရပါမည်) 🌟
+# 🌟 PIL Error Auto-Fix 🌟
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
@@ -9,6 +9,7 @@ import gc
 import json
 import asyncio
 import google.generativeai as genai
+from groq import Groq
 import edge_tts
 import yt_dlp
 from gtts import gTTS
@@ -45,14 +46,19 @@ st.markdown("""
 
 # --- Init Persistent API Storage ---
 API_FILE = "api_config.json"
+saved_gemini = ""
+saved_groq = ""
 if os.path.exists(API_FILE):
-    with open(API_FILE, "r") as f: saved_key = json.load(f).get("api_key", "")
-else: saved_key = ""
+    with open(API_FILE, "r") as f: 
+        data = json.load(f)
+        saved_gemini = data.get("gemini_key", "")
+        saved_groq = data.get("groq_key", "")
 
 # --- Initial Session States ---
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'draft_script' not in st.session_state: st.session_state.draft_script = ""
-if 'api_key' not in st.session_state: st.session_state.api_key = saved_key
+if 'gemini_key' not in st.session_state: st.session_state.gemini_key = saved_gemini
+if 'groq_key' not in st.session_state: st.session_state.groq_key = saved_groq
 
 def next_step(): st.session_state.step += 1
 def prev_step(): st.session_state.step -= 1
@@ -61,7 +67,8 @@ def reset_project():
     for f in ["temp_video.mp4", "temp_audio.mp3", "final_voice.mp3", "final_merged.mp4", "subtitles.srt", "custom_bgm.mp3"]:
         if os.path.exists(f): os.remove(f)
     st.session_state.clear()
-    st.session_state.api_key = saved_key # Key ကိုတော့ ပြန်မှတ်ထားပေးမည်
+    st.session_state.gemini_key = saved_gemini 
+    st.session_state.groq_key = saved_groq
     st.session_state.step = 1
     st.rerun()
 
@@ -76,6 +83,53 @@ def get_best_gemini_model():
         return models[0] if models else "models/gemini-1.5-flash"
     except:
         return "models/gemini-1.5-flash"
+
+# --- 🌟 SMART HYBRID AI ENGINE 🌟 ---
+def generate_script_hybrid(audio_path, prompt_tone, target_duration, is_long):
+    prompt_instruction = f"Summarize this movie plot into an engaging Burmese script for TikTok in a {prompt_tone} tone. {'Target exactly ' + target_duration.split()[0] + ' minutes to read.' if is_long else 'Match original video length.'} Focus only on the main storyline. No markdown."
+    
+    # 1. Try Gemini First (Primary Engine)
+    try:
+        st.write(">> 🟢 Gemini AI ဖြင့် ဇာတ်ညွှန်း ရေးသားနေပါသည်...")
+        genai.configure(api_key=st.session_state.gemini_key)
+        best_model_name = get_best_gemini_model()
+        model = genai.GenerativeModel(best_model_name)
+        audio_file = genai.upload_file(path=audio_path)
+        response = model.generate_content([prompt_instruction, audio_file])
+        return response.text
+        
+    except Exception as gemini_err:
+        err_msg = str(gemini_err)
+        # Check if it's a Limit Error
+        if "429" in err_msg or "Quota" in err_msg or "ResourceExhausted" in err_msg:
+            if not st.session_state.groq_key:
+                raise Exception("Gemini Limit ပြည့်သွားပါသည်။ Groq API Key ထည့်ထားခြင်း မရှိသဖြင့် အလုပ်ရပ်နားလိုက်ပါသည်။")
+            
+            # 2. Fallback to Groq (Secondary Engine)
+            st.warning("⚠️ Gemini Limit ပြည့်သွားသဖြင့် Groq AI သို့ အလိုအလျောက် ကူးပြောင်းနေပါသည်...")
+            client = Groq(api_key=st.session_state.groq_key)
+            
+            # Step 2a: Whisper to Text
+            st.write(">> 🟠 Groq AI (Whisper) ဖြင့် အသံအား စာသားပြောင်းနေပါသည်...")
+            with open(audio_path, "rb") as file:
+                transcription = client.audio.transcriptions.create(
+                  file=(audio_path, file.read()),
+                  model="whisper-large-v3",
+                  response_format="text"
+                )
+            eng_text = transcription
+            
+            # Step 2b: Llama3 to Burmese Script
+            st.write(">> 🟠 Groq AI (Llama 3) ဖြင့် မြန်မာဇာတ်ညွှန်း ရေးသားနေပါသည်...")
+            llama_prompt = f"Translate and summarize the following English text into an engaging Burmese script for TikTok in a {prompt_tone} tone. Return ONLY the Burmese script. No markdown formatting. \n\nEnglish Text: {eng_text}"
+            
+            chat_completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": llama_prompt}],
+                model="llama3-8b-8192",
+            )
+            return chat_completion.choices[0].message.content
+        else:
+            raise Exception(f"Gemini Error: {gemini_err}")
 
 # --- Helpers ---
 async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_filename):
@@ -93,7 +147,7 @@ async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_f
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🎬 Shorts Movie Recap (AI Free)</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Ultimate Master Engine (BGM & Copyright Pro)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Smart Hybrid AI Engine (Gemini + Groq Fallback)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # WIZARD STEP 1: Setup & Media Input
@@ -101,14 +155,18 @@ st.markdown('<div class="sub-title">Ultimate Master Engine (BGM & Copyright Pro)
 if st.session_state.step == 1:
     st.markdown('<div class="step-header">Step 1: Setup & Configuration</div>', unsafe_allow_html=True)
     
-    col_k1, col_k2 = st.columns([3, 1])
+    col_k1, col_k2, col_k3 = st.columns([2, 2, 1])
     with col_k1:
-        api_input = st.text_input("🔑 Google Gemini API Key", type="password", value=st.session_state.api_key)
+        gemini_input = st.text_input("🔑 Google Gemini API Key", type="password", value=st.session_state.gemini_key)
     with col_k2:
+        groq_input = st.text_input("🔑 Groq API Key (Fallback)", type="password", value=st.session_state.groq_key)
+    with col_k3:
         st.write(""); st.write("")
         if st.button("💾 သိမ်းမည်"):
-            with open(API_FILE, "w") as f: json.dump({"api_key": api_input}, f)
-            st.session_state.api_key = api_input
+            with open(API_FILE, "w") as f: 
+                json.dump({"gemini_key": gemini_input, "groq_key": groq_input}, f)
+            st.session_state.gemini_key = gemini_input
+            st.session_state.groq_key = groq_input
             st.success("Saved!")
 
     input_method = st.radio("📥 တင်မည့်ပုံစံ ရွေးချယ်ပါ", ["Upload Video", "YouTube Link"], horizontal=True)
@@ -145,21 +203,15 @@ if st.session_state.step == 1:
         with open("custom_bgm.mp3", "wb") as f: f.write(custom_bgm_file.getbuffer())
 
     if st.button("🚀 Next: Generate Script"):
-        if not st.session_state.api_key: st.error("⚠️ API Key လိုအပ်ပါသည်။")
+        if not st.session_state.gemini_key: st.error("⚠️ Gemini API Key အနည်းဆုံး လိုအပ်ပါသည်။")
         elif not os.path.exists("temp_video.mp4"): st.error("⚠️ ဗီဒီယို အရင်တင်ပါ။")
         else:
-            with st.spinner("Analyzing Video & Auto-Detecting AI Model..."):
-                genai.configure(api_key=st.session_state.api_key)
-                
-                best_model_name = get_best_gemini_model()
-                model = genai.GenerativeModel(best_model_name)
-                
+            with st.spinner("Analyzing Audio & Generating Script..."):
                 video_clip = VideoFileClip("temp_video.mp4")
                 video_clip.audio.write_audiofile("temp_audio.mp3", logger=None)
                 is_long = video_clip.duration > 300
                 video_clip.close()
-                
-                audio_file = genai.upload_file(path="temp_audio.mp3")
+                gc.collect()
                 
                 tone_map = {
                     "Narrative (ဇာတ်လမ်းပြောဟန်)": "narrative storytelling",
@@ -169,11 +221,11 @@ if st.session_state.step == 1:
                 }
                 selected_tone = tone_map[script_tone]
                 
-                prompt = f"Summarize this movie plot into an engaging Burmese script for TikTok in a {selected_tone} tone. {'Target exactly ' + target_duration.split()[0] + ' minutes to read.' if is_long else 'Match original video length.'} Focus only on the main storyline. No markdown."
-                
                 try:
-                    response = model.generate_content([prompt, audio_file])
-                    st.session_state.draft_script = response.text
+                    # Execute Hybrid Logic
+                    final_draft = generate_script_hybrid("temp_audio.mp3", selected_tone, target_duration, is_long)
+                    
+                    st.session_state.draft_script = final_draft
                     st.session_state.is_long_video = is_long
                     st.session_state.use_bgm = use_bgm
                     st.session_state.script_tone = script_tone
@@ -182,7 +234,7 @@ if st.session_state.step == 1:
                     next_step()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"AI Error: {e} - (API Key ကို ပြန်လည်စစ်ဆေးပါ)")
+                    st.error(f"Processing Error: {e}")
 
 # ==========================================
 # WIZARD STEP 2: Editor
