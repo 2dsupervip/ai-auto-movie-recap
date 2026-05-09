@@ -1,3 +1,8 @@
+# 🌟 PIL Error ဖြေရှင်းရန် Auto-Fix (အခြားအရာများ မခေါ်မီ ထိပ်ဆုံးတွင် ထားရပါမည်) 🌟
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
+
 import streamlit as st
 import os
 import gc
@@ -7,12 +12,6 @@ import google.generativeai as genai
 import edge_tts
 import yt_dlp
 from gtts import gTTS
-
-# 🌟 PIL ANTIALIAS Error ဖြေရှင်းရန် Auto-Fix (MoviePy မခေါ်ခင် ထားရပါမည်) 🌟
-import PIL.Image
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
-
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
 from proglog import ProgressBarLogger
 
@@ -76,7 +75,7 @@ def get_best_gemini_model():
             if "1.5-pro" in m: return m
         return models[0] if models else "models/gemini-1.5-flash"
     except:
-        return "models/gemini-1.5-flash" # Fallback
+        return "models/gemini-1.5-flash"
 
 # --- Helpers ---
 async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_filename):
