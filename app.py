@@ -60,6 +60,7 @@ if 'step' not in st.session_state: st.session_state.step = 1
 if 'draft_script' not in st.session_state: st.session_state.draft_script = ""
 if 'ready_made_prompt' not in st.session_state: st.session_state.ready_made_prompt = ""
 if 'video_duration' not in st.session_state: st.session_state.video_duration = 0
+if 'is_rendered' not in st.session_state: st.session_state.is_rendered = False # 🌟 Render Lock Flag 🌟
 for k, v in saved_keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
@@ -76,12 +77,27 @@ def reset_project():
     st.session_state.clear()
     for k, v in keys_to_keep.items(): st.session_state[k] = v
     st.session_state.step = 1
+    st.session_state.is_rendered = False # 🌟 Reset Lock 🌟
     st.rerun()
 
-# --- 🌟 SMART PROMPT LOGIC (MARKDOWN BUG FIXED) 🌟 ---
+# --- 🌟 SRT AND PREMIUM VOICE HELPER 🌟 ---
+async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_filename):
+    communicate = edge_tts.Communicate(text, voice_name)
+    submaker = edge_tts.SubMaker()
+    with open(audio_filename, "wb") as file:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                if hasattr(submaker, 'feed'): submaker.feed(chunk)
+                else: submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+    with open(srt_filename, "w", encoding="utf-8") as file:
+        if hasattr(submaker, 'get_srt'): file.write(submaker.get_srt())
+        else: file.write(submaker.generate_subs())
+
+# --- SMART PROMPT LOGIC ---
 def get_prompt_with_limit(duration_seconds, tone):
     word_limit = int((duration_seconds / 60) * 140)
-    bt = "`" * 3 # Prevent copy-paste breaking
+    bt = "`" * 3
     return f"""
     Act as a professional Burmese movie recapper. 
     Summarize this plot into a natural, engaging Burmese script.
@@ -109,7 +125,7 @@ def execute_gemini_smart(audio_path, tone, duration):
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🎬 AI Movie Recap Studio Pro</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Smart Duration | Voice Sync | Full Automation</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Smart Duration | Voice & SRT Sync | Full Automation</div>', unsafe_allow_html=True)
 
 # ==========================================
 # WIZARD STEP 1: Settings & Media
@@ -171,7 +187,7 @@ if st.session_state.step == 1:
                             transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
                         limit = int((st.session_state.video_duration/60)*140)
                         
-                        bt = "`" * 3 # Prevent copy-paste breaking
+                        bt = "`" * 3
                         st.session_state.ready_made_prompt = f"""Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.
 TONE: {tone_map[script_tone]}
 LENGTH: ~{limit} Burmese words.
@@ -192,11 +208,10 @@ Transcription:
 # ==========================================
 elif st.session_state.step == 2:
     st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
-    bt = "`" * 3 # Safe backticks
+    bt = "`" * 3 
     
     if st.session_state.workflow_mode == "Auto":
         st.info("Copy ခလုတ်ကို နှိပ်၍ ဇာတ်ညွှန်းကို ကူးယူနိုင်ပါသည်။")
-        # Ensure no backticks mess up the display
         display_text = st.session_state.draft_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
         st.code(display_text, language="markdown")
         edited_script = st.text_area("✍️ လိုအပ်ပါက ပြင်ဆင်ပါ:", value=display_text, height=300)
@@ -212,6 +227,7 @@ elif st.session_state.step == 2:
         else: 
             clean_edited = edited_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
             st.session_state.final_script = clean_edited
+            st.session_state.is_rendered = False # 🌟 အသစ်ပြန်ပေါင်းရန် Reset Lock 🌟
             next_step()
             st.rerun()
 
@@ -220,29 +236,51 @@ elif st.session_state.step == 2:
 # ==========================================
 elif st.session_state.step == 3:
     st.markdown('<div class="step-header">Step 3: Final Output</div>', unsafe_allow_html=True)
-    with st.spinner("Rendering..."):
-        try:
-            if "Premium" in st.session_state.tts_engine:
-                voice = "my-MM-ThihaNeural" if st.session_state.gender == "Male" else "my-MM-NilarNeural"
-                asyncio.run(edge_tts.Communicate(st.session_state.final_script, voice).save("final_voice.mp3"))
-            else: gTTS(text=st.session_state.final_script, lang='my').save("final_voice.mp3")
-            
-            video, audio = VideoFileClip("temp_video.mp4"), AudioFileClip("final_voice.mp3")
-            import moviepy.video.fx.all as vfx
-            import moviepy.audio.fx.all as afx
-            
-            final_v = video.speedx(factor=video.duration/audio.duration).fx(vfx.mirror_x).set_audio(audio)
-            w, h = final_v.size
-            final_v = final_v.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97).resize(height=720)
-            
-            if st.session_state.use_bgm:
-                bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/narrative.mp3"
-                if os.path.exists(bgm_path):
-                    bgm = AudioFileClip(bgm_path).fx(afx.volumex, 0.12).set_duration(audio.duration)
-                    final_v = final_v.set_audio(CompositeAudioClip([audio, bgm]))
+    
+    # 🌟 Render Lock System: တစ်ခါပေါင်းပြီးရင် ထပ်မပေါင်းတော့ပါ 🌟
+    if not st.session_state.is_rendered:
+        with st.spinner("Rendering Video & Generating Subtitles..."):
+            try:
+                # 🌟 FULL SRT & TTS GENERATION 🌟
+                if "Premium" in st.session_state.tts_engine:
+                    voice = "my-MM-ThihaNeural" if st.session_state.gender == "Male" else "my-MM-NilarNeural"
+                    asyncio.run(generate_premium_voice_and_srt(st.session_state.final_script, voice, "final_voice.mp3", "subtitles.srt"))
+                else: 
+                    gTTS(text=st.session_state.final_script, lang='my').save("final_voice.mp3")
+                
+                video, audio = VideoFileClip("temp_video.mp4"), AudioFileClip("final_voice.mp3")
+                import moviepy.video.fx.all as vfx
+                import moviepy.audio.fx.all as afx
+                
+                final_v = video.speedx(factor=video.duration/audio.duration).fx(vfx.mirror_x).set_audio(audio)
+                w, h = final_v.size
+                final_v = final_v.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97).resize(height=720)
+                
+                if st.session_state.use_bgm:
+                    bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/narrative.mp3"
+                    if os.path.exists(bgm_path):
+                        bgm = AudioFileClip(bgm_path).fx(afx.volumex, 0.12).set_duration(audio.duration)
+                        final_v = final_v.set_audio(CompositeAudioClip([audio, bgm]))
 
-            final_v.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=StreamlitLogger())
-            st.success("ပြီးပါပြီ!"); st.video("final_merged.mp4")
-            with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download", data=f, file_name="Final_Recap.mp4")
-            if st.button("🔄 New Project"): reset_project()
-        except Exception as e: st.error(f"Error: {e}")
+                final_v.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=StreamlitLogger())
+                
+                st.session_state.is_rendered = True # 🌟 Lock the render process 🌟
+                st.rerun() # Refresh page to show final buttons
+            except Exception as e: 
+                st.error(f"Error: {e}")
+
+    # 🌟 Render ပြီးသွားမှသာ အောက်ပါ UI များ ပေါ်လာမည် 🌟
+    if st.session_state.is_rendered:
+        st.success("🎉 ပြီးပါပြီ! Video နှင့် SRT ဖိုင် အဆင်သင့်ဖြစ်ပါပြီ။")
+        if os.path.exists("final_merged.mp4"): st.video("final_merged.mp4")
+        
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            if os.path.exists("final_merged.mp4"):
+                with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download Video", data=f, file_name="Final_Recap.mp4")
+        with col_d2:
+            if os.path.exists("subtitles.srt") and "Premium" in st.session_state.tts_engine:
+                with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT (Subtitles)", data=f, file_name="Subtitles.srt")
+                
+        st.markdown("---")
+        if st.button("🔄 New Project"): reset_project()
