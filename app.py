@@ -170,9 +170,15 @@ if st.session_state.step == 1:
                             transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
                         limit = int((st.session_state.video_duration/60)*140)
                         
-                        # 🌟 FULLY UPDATED MANUAL PROMPT FOR ONE-CLICK COPY IN GEMINI WEB 🌟
-                        st.session_state.ready_made_prompt = f"Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.\nTONE: {tone_map[script_tone]}\nLENGTH: ~{limit} Burmese words.\nCRITICAL: Return the final Burmese script ONLY inside a markdown code block (```text ... 
-```) so I can copy it with one click. Do not include any extra text.\n\nTranscription:\n{transcription}"
+                        # 🌟 ERROR FIXED HERE (Using f"""...""" Triple Quotes) 🌟
+                        st.session_state.ready_made_prompt = f"""Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.
+TONE: {tone_map[script_tone]}
+LENGTH: ~{limit} Burmese words.
+CRITICAL: Return the final Burmese script ONLY inside a markdown code block (
+```text ... ```) so I can copy it with one click. Do not include any extra text.
+
+Transcription:
+{transcription}"""
                         
                         st.session_state.workflow_mode = "Manual"
                     
@@ -188,7 +194,8 @@ elif st.session_state.step == 2:
     st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
     if st.session_state.workflow_mode == "Auto":
         st.info("Copy ခလုတ်ကို နှိပ်၍ ဇာတ်ညွှန်းကို ကူးယူနိုင်ပါသည်။")
-        display_text = st.session_state.draft_script.replace("```text", "").replace("```markdown", "").replace("```", "").strip()
+        display_text = st.session_state.draft_script.replace("```text", "").replace("
+```markdown", "").replace("```", "").strip()
         st.code(display_text, language="markdown")
         edited_script = st.text_area("✍️ လိုအပ်ပါက ပြင်ဆင်ပါ:", value=display_text, height=300)
     else:
@@ -201,7 +208,6 @@ elif st.session_state.step == 2:
     if c2.button("🎙️ Next: Render"):
         if not edited_script.strip(): st.error("စာသားထည့်ပါ")
         else: 
-            # 🌟 Clean up markdown block if user pastes the whole block back 🌟
             clean_edited = edited_script.replace("```text", "").replace("
 ```markdown", "").replace("```", "").strip()
             st.session_state.final_script = clean_edited
