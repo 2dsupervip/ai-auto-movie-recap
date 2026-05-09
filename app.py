@@ -7,10 +7,7 @@ import google.generativeai as genai
 import edge_tts
 import yt_dlp
 from gtts import gTTS
-from moviepy import VideoFileClip, AudioFileClip
-from moviepy.audio.AudioClip import CompositeAudioClip
-import moviepy.audio.fx.all as afx
-import moviepy.video.fx.all as vfx
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
 from proglog import ProgressBarLogger
 
 # --- Custom Logger for Streamlit Progress Bar ---
@@ -63,7 +60,7 @@ def reset_project():
     st.session_state.step = 1
     st.rerun()
 
-# --- AI Model Auto-Detector (To fix NotFound Error) ---
+# --- AI Model Auto-Detector ---
 def get_best_gemini_model():
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -128,7 +125,6 @@ if st.session_state.step == 1:
     st.markdown("### 🎛️ Advanced Settings")
     col1, col2 = st.columns(2)
     with col1:
-        # 🌟 ဇာတ်ညွှန်းပုံစံ (၄) မျိုး ပြန်လည်ထည့်သွင်းခြင်း 🌟
         script_tone = st.selectbox("📝 ဇာတ်ညွှန်း ပြောဟန် (Script Tone)", ["Narrative (ဇာတ်လမ်းပြောဟန်)", "Calm (အေးအေးဆေးဆေး)", "Energetic (တက်တက်ကြွကြွ)", "Dramatic (ခံစားချက်အပြည့်)"])
         use_bgm = st.checkbox("🎶 နောက်ခံတီးလုံး (BGM) ထည့်မည်", value=True)
     with col2:
@@ -139,7 +135,6 @@ if st.session_state.step == 1:
         else:
             voice_gender = "None"
 
-    # Custom BGM Option
     custom_bgm_file = st.file_uploader("📂 ကိုယ်ပိုင်တီးလုံးတင်ရန် (မဖြစ်မနေမဟုတ်ပါ)", type=["mp3"])
     if custom_bgm_file:
         with open("custom_bgm.mp3", "wb") as f: f.write(custom_bgm_file.getbuffer())
@@ -151,7 +146,6 @@ if st.session_state.step == 1:
             with st.spinner("Analyzing Video & Auto-Detecting AI Model..."):
                 genai.configure(api_key=st.session_state.api_key)
                 
-                # Model Auto-Detect
                 best_model_name = get_best_gemini_model()
                 model = genai.GenerativeModel(best_model_name)
                 
@@ -162,7 +156,6 @@ if st.session_state.step == 1:
                 
                 audio_file = genai.upload_file(path="temp_audio.mp3")
                 
-                # 🌟 Tone Map Logic 🌟
                 tone_map = {
                     "Narrative (ဇာတ်လမ်းပြောဟန်)": "narrative storytelling",
                     "Calm (အေးအေးဆေးဆေး)": "calm and relaxing",
@@ -208,7 +201,6 @@ elif st.session_state.step == 3:
     
     with st.spinner("Generating Voice & Processing Video..."):
         try:
-            # 1. Voice Generation
             clean_script = st.session_state.final_script.replace("*", "")
             has_srt = False
             
@@ -219,7 +211,6 @@ elif st.session_state.step == 3:
             else:
                 gTTS(text=clean_script, lang='my').save("final_voice.mp3")
             
-            # 2. Video Processing
             if st.session_state.is_long_video:
                 st.success("Long Video အား အနှစ်ချုပ် အသံဖိုင် ထုတ်ပေးပြီးပါပြီ!")
                 st.audio("final_voice.mp3")
@@ -230,37 +221,31 @@ elif st.session_state.step == 3:
                     with col_dl2:
                         with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT File", data=f, file_name="Subs.srt", mime="text/plain")
             else:
+                # 🌟 Dynamically import fx inside function block to prevent Boot Error 🌟
+                import moviepy.video.fx.all as vfx
+                import moviepy.audio.fx.all as afx
+                
                 video_clip = VideoFileClip("temp_video.mp4")
                 voice_audio = AudioFileClip("final_voice.mp3")
                 
-                # Copyright FX (Mirror, Crop, Speed, Color)
-                processed_video = video_clip.speedx(factor=video_clip.duration/voice_audio.duration).fx(vfx.mirror_x)
+                speed_factor = video_clip.duration / voice_audio.duration
+                processed_video = video_clip.speedx(factor=speed_factor).fx(vfx.mirror_x)
                 w, h = processed_video.size
                 
-                if hasattr(processed_video, 'cropped'):
-                    processed_video = processed_video.cropped(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
-                else:
-                    processed_video = processed_video.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+                processed_video = processed_video.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+                processed_video = processed_video.resize(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
                 
-                if hasattr(processed_video, 'resized'):
-                    processed_video = processed_video.resized(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
-                else:
-                    processed_video = processed_video.resize(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
-                
-                # BGM Mixing
                 final_audio = voice_audio
                 if st.session_state.use_bgm:
-                    bgm_name = st.session_state.script_tone.split(" ")[0].lower() # e.g., "narrative"
+                    bgm_name = st.session_state.script_tone.split(" ")[0].lower()
                     bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/{bgm_name}.mp3"
                     
                     if os.path.exists(bgm_path):
-                        # Use afx.volumex to ensure compatibility
                         bgm = AudioFileClip(bgm_path).fx(afx.volumex, 0.12).set_duration(voice_audio.duration)
                         final_audio = CompositeAudioClip([voice_audio.set_start(0), bgm.set_start(0)])
 
                 final_video = processed_video.set_audio(final_audio)
                 
-                # Render using Logger
                 my_logger = StreamlitLogger()
                 final_video.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=my_logger)
                 
