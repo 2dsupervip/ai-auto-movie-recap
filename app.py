@@ -125,7 +125,7 @@ def execute_gemini_smart(audio_path, tone, duration):
             else: raise e
 
 # --- UI Header ---
-st.markdown('<div class="main-title">🎬 AI Movie Recap Studio Pro</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🎬 Shorts Movie Recap (AI Free)</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Smart Duration | Voice & SRT Sync | Full Automation</div>', unsafe_allow_html=True)
 
 # ==========================================
@@ -189,7 +189,6 @@ if st.session_state.step == 1:
                         limit = int((st.session_state.video_duration/60)*140)
                         bt = "`" * 3
                         
-                        # Added No-Bracket Name Instruction Here Too
                         st.session_state.ready_made_prompt = f"""Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.
 TONE: {tone_map[script_tone]}
 LENGTH: ~{limit} Burmese words.
@@ -221,7 +220,6 @@ elif st.session_state.step == 2:
     else:
         st.info("💡 အောက်ပါစာသားကို Copy ယူပြီး Gemini တွင် ထည့်ပါ။ Gemini မှထွက်လာသော Code Block ကို Copy ပြန်ယူပြီး အောက်တွင် Paste လုပ်ပါ။")
         st.code(st.session_state.ready_made_prompt, language="text")
-        # 🌟 Keep state mapped so Back button preserves edits 🌟
         edited_script = st.text_area("✍️ Paste translated script here:", value=st.session_state.draft_script, height=300)
 
     c1, c2 = st.columns(2)
@@ -230,7 +228,6 @@ elif st.session_state.step == 2:
         if not edited_script.strip(): st.error("စာသားထည့်ပါ")
         else: 
             clean_edited = edited_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
-            # 🌟 Save the edited script back to state 🌟
             st.session_state.draft_script = clean_edited 
             st.session_state.final_script = clean_edited
             st.session_state.is_rendered = False 
@@ -282,14 +279,12 @@ elif st.session_state.step == 3:
             if os.path.exists("final_merged.mp4"):
                 with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download Video", data=f, file_name="Final_Recap.mp4")
         with col_d2:
-            # 🌟 SRT Download Bug Fixed by reading file content safely 🌟
             if os.path.exists("subtitles.srt") and "Premium" in st.session_state.tts_engine:
                 with open("subtitles.srt", "rb") as f: srt_bytes = f.read()
                 st.download_button("📝 Download SRT (Subtitles)", data=srt_bytes, file_name="Subtitles.srt", mime="text/plain")
                 
         st.markdown("---")
         
-        # 🌟 Back Button and New Project Added 🌟
         col_b1, col_b2 = st.columns(2)
         with col_b1:
             if st.button("⬅️ Back to Editor (စာသားပြန်ပြင်ရန်)"): 
