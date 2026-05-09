@@ -7,6 +7,12 @@ import google.generativeai as genai
 import edge_tts
 import yt_dlp
 from gtts import gTTS
+
+# 🌟 PIL ANTIALIAS Error ဖြေရှင်းရန် Auto-Fix (MoviePy မခေါ်ခင် ထားရပါမည်) 🌟
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
+
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
 from proglog import ProgressBarLogger
 
@@ -219,9 +225,9 @@ elif st.session_state.step == 3:
                     with open("final_voice.mp3", "rb") as f: st.download_button("🎙️ Download Audio Only", data=f, file_name="Recap_Audio.mp3", mime="audio/mp3")
                 if has_srt:
                     with col_dl2:
-                        with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT File", data=f, file_name="Subs.srt", mime="text/plain")
+                        if os.path.exists("subtitles.srt"):
+                            with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT File", data=f, file_name="Subs.srt", mime="text/plain")
             else:
-                # 🌟 Dynamically import fx inside function block to prevent Boot Error 🌟
                 import moviepy.video.fx.all as vfx
                 import moviepy.audio.fx.all as afx
                 
