@@ -60,7 +60,7 @@ if 'step' not in st.session_state: st.session_state.step = 1
 if 'draft_script' not in st.session_state: st.session_state.draft_script = ""
 if 'ready_made_prompt' not in st.session_state: st.session_state.ready_made_prompt = ""
 if 'video_duration' not in st.session_state: st.session_state.video_duration = 0
-if 'is_rendered' not in st.session_state: st.session_state.is_rendered = False # 🌟 Render Lock Flag 🌟
+if 'is_rendered' not in st.session_state: st.session_state.is_rendered = False
 for k, v in saved_keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
@@ -77,7 +77,7 @@ def reset_project():
     st.session_state.clear()
     for k, v in keys_to_keep.items(): st.session_state[k] = v
     st.session_state.step = 1
-    st.session_state.is_rendered = False # 🌟 Reset Lock 🌟
+    st.session_state.is_rendered = False
     st.rerun()
 
 # --- 🌟 SRT AND PREMIUM VOICE HELPER 🌟 ---
@@ -94,7 +94,7 @@ async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_f
         if hasattr(submaker, 'get_srt'): file.write(submaker.get_srt())
         else: file.write(submaker.generate_subs())
 
-# --- SMART PROMPT LOGIC ---
+# --- SMART PROMPT LOGIC (ADDED NO-BRACKET NAME RULE) ---
 def get_prompt_with_limit(duration_seconds, tone):
     word_limit = int((duration_seconds / 60) * 140)
     bt = "`" * 3
@@ -103,8 +103,9 @@ def get_prompt_with_limit(duration_seconds, tone):
     Summarize this plot into a natural, engaging Burmese script.
     TONE: {tone}
     LENGTH: ~{word_limit} Burmese words.
-    FORMAT: Return the final Burmese script ONLY inside a markdown code block ({bt}). 
-    No other text or explanations.
+    CRITICAL INSTRUCTIONS:
+    1. Return the final Burmese script ONLY inside a markdown code block ({bt}). No other text.
+    2. Do NOT include English names in parentheses. Write names naturally in Burmese only (e.g., write "ဂျက်", NOT "ဂျက် (Jack)").
     """
 
 # --- AI Executors ---
@@ -186,16 +187,18 @@ if st.session_state.step == 1:
                         with open("temp_audio.mp3", "rb") as f:
                             transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
                         limit = int((st.session_state.video_duration/60)*140)
-                        
                         bt = "`" * 3
+                        
+                        # Added No-Bracket Name Instruction Here Too
                         st.session_state.ready_made_prompt = f"""Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.
 TONE: {tone_map[script_tone]}
 LENGTH: ~{limit} Burmese words.
-CRITICAL: Return the final Burmese script ONLY inside a markdown code block ({bt}text ... {bt}) so I can copy it with one click. Do not include any extra text.
+CRITICAL INSTRUCTIONS:
+1. Return the final Burmese script ONLY inside a markdown code block ({bt}text ... {bt}) so I can copy it.
+2. Do NOT include English names in parentheses. Write names naturally in Burmese only (e.g., write "ဂျက်", NOT "ဂျက် (Jack)").
 
 Transcription:
 {transcription}"""
-                        
                         st.session_state.workflow_mode = "Manual"
                     
                     st.session_state.tts_engine, st.session_state.gender, st.session_state.use_bgm = tts_engine, gender, use_bgm
@@ -218,7 +221,8 @@ elif st.session_state.step == 2:
     else:
         st.info("💡 အောက်ပါစာသားကို Copy ယူပြီး Gemini တွင် ထည့်ပါ။ Gemini မှထွက်လာသော Code Block ကို Copy ပြန်ယူပြီး အောက်တွင် Paste လုပ်ပါ။")
         st.code(st.session_state.ready_made_prompt, language="text")
-        edited_script = st.text_area("✍️ Paste translated script here:", height=300)
+        # 🌟 Keep state mapped so Back button preserves edits 🌟
+        edited_script = st.text_area("✍️ Paste translated script here:", value=st.session_state.draft_script, height=300)
 
     c1, c2 = st.columns(2)
     if c1.button("⬅️ Back"): st.session_state.step = 1; st.rerun()
@@ -226,8 +230,10 @@ elif st.session_state.step == 2:
         if not edited_script.strip(): st.error("စာသားထည့်ပါ")
         else: 
             clean_edited = edited_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
+            # 🌟 Save the edited script back to state 🌟
+            st.session_state.draft_script = clean_edited 
             st.session_state.final_script = clean_edited
-            st.session_state.is_rendered = False # 🌟 အသစ်ပြန်ပေါင်းရန် Reset Lock 🌟
+            st.session_state.is_rendered = False 
             next_step()
             st.rerun()
 
@@ -237,11 +243,9 @@ elif st.session_state.step == 2:
 elif st.session_state.step == 3:
     st.markdown('<div class="step-header">Step 3: Final Output</div>', unsafe_allow_html=True)
     
-    # 🌟 Render Lock System: တစ်ခါပေါင်းပြီးရင် ထပ်မပေါင်းတော့ပါ 🌟
     if not st.session_state.is_rendered:
         with st.spinner("Rendering Video & Generating Subtitles..."):
             try:
-                # 🌟 FULL SRT & TTS GENERATION 🌟
                 if "Premium" in st.session_state.tts_engine:
                     voice = "my-MM-ThihaNeural" if st.session_state.gender == "Male" else "my-MM-NilarNeural"
                     asyncio.run(generate_premium_voice_and_srt(st.session_state.final_script, voice, "final_voice.mp3", "subtitles.srt"))
@@ -264,12 +268,11 @@ elif st.session_state.step == 3:
 
                 final_v.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=StreamlitLogger())
                 
-                st.session_state.is_rendered = True # 🌟 Lock the render process 🌟
-                st.rerun() # Refresh page to show final buttons
+                st.session_state.is_rendered = True 
+                st.rerun() 
             except Exception as e: 
                 st.error(f"Error: {e}")
 
-    # 🌟 Render ပြီးသွားမှသာ အောက်ပါ UI များ ပေါ်လာမည် 🌟
     if st.session_state.is_rendered:
         st.success("🎉 ပြီးပါပြီ! Video နှင့် SRT ဖိုင် အဆင်သင့်ဖြစ်ပါပြီ။")
         if os.path.exists("final_merged.mp4"): st.video("final_merged.mp4")
@@ -279,8 +282,19 @@ elif st.session_state.step == 3:
             if os.path.exists("final_merged.mp4"):
                 with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download Video", data=f, file_name="Final_Recap.mp4")
         with col_d2:
+            # 🌟 SRT Download Bug Fixed by reading file content safely 🌟
             if os.path.exists("subtitles.srt") and "Premium" in st.session_state.tts_engine:
-                with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT (Subtitles)", data=f, file_name="Subtitles.srt")
+                with open("subtitles.srt", "rb") as f: srt_bytes = f.read()
+                st.download_button("📝 Download SRT (Subtitles)", data=srt_bytes, file_name="Subtitles.srt", mime="text/plain")
                 
         st.markdown("---")
-        if st.button("🔄 New Project"): reset_project()
+        
+        # 🌟 Back Button and New Project Added 🌟
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("⬅️ Back to Editor (စာသားပြန်ပြင်ရန်)"): 
+                st.session_state.step = 2
+                st.session_state.is_rendered = False
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 New Project (အသစ်ပြန်စရန်)"): reset_project()
