@@ -54,7 +54,7 @@ if os.path.exists(API_FILE):
 # --- Initial Session States ---
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'draft_script' not in st.session_state: st.session_state.draft_script = ""
-if 'manual_eng_script' not in st.session_state: st.session_state.manual_eng_script = ""
+if 'ready_made_prompt' not in st.session_state: st.session_state.ready_made_prompt = ""
 if 'workflow_mode' not in st.session_state: st.session_state.workflow_mode = "Auto"
 for k in saved_keys:
     if k not in st.session_state: st.session_state[k] = saved_keys[k]
@@ -62,24 +62,30 @@ for k in saved_keys:
 def next_step(): st.session_state.step += 1
 def prev_step(): st.session_state.step -= 1
 
+# 🌟 Force Reset Bug Fix 🌟
 def reset_project():
+    gc.collect() # Force memory cleanup
+    # Lock ကျနေသော File များကြောင့် Error မတက်စေရန် try-except ဖြင့် ဖျက်ပါမည်
     for f in ["temp_video.mp4", "temp_audio.mp3", "final_voice.mp3", "final_merged.mp4", "subtitles.srt", "custom_bgm.mp3"]:
-        if os.path.exists(f): os.remove(f)
+        try:
+            if os.path.exists(f): os.remove(f)
+        except Exception:
+            pass 
+            
     keys_cache = {k: st.session_state[k] for k in saved_keys}
     st.session_state.clear()
     for k, v in keys_cache.items(): st.session_state[k] = v
     st.session_state.step = 1
     st.rerun()
 
-# --- 🌟 AI Model Scanners 🌟 ---
+# --- AI Model Scanners ---
 def get_best_gemini_model():
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for m in models:
             if "1.5-flash" in m: return m
         return models[0] if models else "models/gemini-1.5-flash"
-    except:
-        return "models/gemini-1.5-flash"
+    except: return "models/gemini-1.5-flash"
 
 def get_best_groq_chat_model(client):
     try:
@@ -123,8 +129,7 @@ def execute_gemini_multi_key(audio_path, prompt_tone, target_duration, is_long):
                 if idx < len(active_keys) - 1:
                     st.warning(f"⚠️ Key {idx+1} Limit ပြည့်သွားပါပြီ။ Key {idx+2} သို့ အလိုအလျောက် ပြောင်းလဲနေပါသည်။")
                     continue
-                else:
-                    raise Exception("ထည့်သွင်းထားသော Gemini Key များအားလုံး Limit ပြည့်သွားပါပြီ။")
+                else: raise Exception("ထည့်သွင်းထားသော Gemini Key များအားလုံး Limit ပြည့်သွားပါပြီ။")
             else: raise Exception(f"Gemini Error: {e}")
 
 def execute_groq_manual(audio_path, prompt_tone, target_duration, is_long):
@@ -169,7 +174,6 @@ st.markdown('<div class="sub-title">Auto-Detect Multi-Lang | Gemini Rotation | G
 if st.session_state.step == 1:
     st.markdown('<div class="step-header">Step 1: AI Settings & Media Input</div>', unsafe_allow_html=True)
     
-    # API Keys Expander
     with st.expander("⚙️ API Key Settings (Gemini & Groq)", expanded=False):
         col_g1, col_g2, col_g3 = st.columns(3)
         with col_g1: st.session_state.gemini_1 = st.text_input("Gemini Key 1 (Main)", type="password", value=st.session_state.gemini_1)
@@ -182,7 +186,6 @@ if st.session_state.step == 1:
                 json.dump({"gemini_1": st.session_state.gemini_1, "gemini_2": st.session_state.gemini_2, "gemini_3": st.session_state.gemini_3, "groq_1": st.session_state.groq_1}, f)
             st.success("API Keys သိမ်းဆည်းပြီးပါပြီ!")
 
-    # Video Input
     st.markdown("### 📥 Media Source")
     input_method = st.radio("ရွေးချယ်ရန်:", ["Upload Video", "YouTube Link"], horizontal=True, label_visibility="collapsed")
     if input_method == "Upload Video":
@@ -200,12 +203,17 @@ if st.session_state.step == 1:
                     st.success("YouTube Video Downloaded!")
                 except Exception as e: st.error(f"Download Error: {e}")
 
-    # Settings
     st.markdown("### 🎛️ Preferences")
     col1, col2 = st.columns(2)
     with col1:
         workflow = st.radio("🔄 လုပ်ငန်းစဉ် ရွေးချယ်ရန်", ["Auto Mode (Direct to Burmese via Gemini)", "Manual Mode (English Script via Groq)"])
-        script_tone = st.selectbox("📝 ဇာတ်ညွှန်း ပြောဟန် (Tone)", ["Narrative", "Calm", "Energetic", "Dramatic"])
+        # 🌟 Tone ရွေးချယ်မှုတွင် မြန်မာစာသားများ ပေါင်းထည့်ခြင်း 🌟
+        script_tone = st.selectbox("📝 ဇာတ်ညွှန်း ပြောဟန် (Tone)", [
+            "Narrative (ဇာတ်လမ်းပြောဟန်)", 
+            "Calm (အေးအေးဆေးဆေး)", 
+            "Energetic (တက်တက်ကြွကြွ)", 
+            "Dramatic (ခံစားချက်အပြည့်)"
+        ])
         use_bgm = st.checkbox("🎶 နောက်ခံတီးလုံး (BGM) ထည့်မည်", value=True)
     with col2:
         tts_engine = st.selectbox("🎙️ Voice Engine", ["Premium (Nilar/Thiha)", "Standard (gTTS)"])
@@ -226,8 +234,13 @@ if st.session_state.step == 1:
                 video_clip.close()
                 gc.collect()
                 
-                tone_map = {"Narrative": "narrative storytelling", "Calm": "calm and relaxing", "Energetic": "highly energetic and enthusiastic", "Dramatic": "intensely dramatic and emotional"}
-                selected_tone = tone_map[script_tone.split(" ")[0]]
+                tone_map = {
+                    "Narrative (ဇာတ်လမ်းပြောဟန်)": "narrative storytelling", 
+                    "Calm (အေးအေးဆေးဆေး)": "calm and relaxing", 
+                    "Energetic (တက်တက်ကြွကြွ)": "highly energetic and enthusiastic", 
+                    "Dramatic (ခံစားချက်အပြည့်)": "intensely dramatic and emotional"
+                }
+                selected_tone = tone_map[script_tone]
                 
                 try:
                     if "Auto Mode" in workflow:
@@ -236,8 +249,12 @@ if st.session_state.step == 1:
                         st.session_state.workflow_mode = "Auto"
                     else:
                         eng_script = execute_groq_manual("temp_audio.mp3", selected_tone, target_duration, is_long)
-                        st.session_state.manual_eng_script = eng_script
-                        st.session_state.draft_script = "" # Clear previous
+                        
+                        # 🌟 Ready-Made Prompt ပြင်ဆင်ခြင်း 🌟
+                        ready_prompt = f"Translate and summarize the following English movie recap into an engaging Burmese script for a TikTok video. \nUse a {selected_tone} tone. Return ONLY the Burmese script without markdown.\n\nEnglish Script:\n{eng_script}"
+                        st.session_state.ready_made_prompt = ready_prompt
+                        
+                        st.session_state.draft_script = ""
                         st.session_state.workflow_mode = "Manual"
                     
                     st.session_state.is_long_video = is_long
@@ -260,9 +277,12 @@ elif st.session_state.step == 2:
         st.info("💡 Auto Mode: Gemini မှ အလိုအလျောက် ရေးသားထားသော မြန်မာဇာတ်ညွှန်းဖြစ်ပါသည်။")
         edited_script = st.text_area("Edit Burmese Script:", value=st.session_state.draft_script, height=350)
     else:
-        st.warning("💡 Manual Mode: အောက်ပါ English Script အား Copy ကူးယူပြီး ChatGPT တွင် မြန်မာလို ဘာသာပြန်ပါ။ ထို့နောက် အောက်ဆုံး Box တွင် ပြန်လည်ထည့်သွင်းပါ။")
-        st.text_area("📋 1. Copy this English Script:", value=st.session_state.manual_eng_script, height=200, disabled=True)
-        edited_script = st.text_area("✍️ 2. Paste your translated Burmese Script here:", value=st.session_state.draft_script, height=200)
+        # 🌟 Copy ခလုတ်ပါဝင်သော Ready-Made Prompt Box 🌟
+        st.warning("💡 Manual Mode: အောက်ပါ Box ညာဘက်အပေါ်ထောင့်ရှိ 'Copy' ခလုတ်ကို နှိပ်၍ Gemini တွင် သွားရောက်ထည့်သွင်းပါ။ ထွက်လာသော မြန်မာဇာတ်ညွှန်းကို အောက်ဆုံး Box တွင် ပြန်ထည့်ပါ။")
+        
+        st.code(st.session_state.ready_made_prompt, language="text") # Code block ဖြင့် ပြသခြင်းဖြင့် Copy ခလုတ် အလိုလို ရရှိမည်
+        
+        edited_script = st.text_area("✍️ Paste your translated Burmese Script here:", value=st.session_state.draft_script, height=250)
 
     col1, col2 = st.columns(2)
     with col1:
