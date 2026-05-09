@@ -78,15 +78,16 @@ def reset_project():
     st.session_state.step = 1
     st.rerun()
 
-# --- 🌟 SMART PROMPT LOGIC 🌟 ---
+# --- 🌟 SMART PROMPT LOGIC (MARKDOWN BUG FIXED) 🌟 ---
 def get_prompt_with_limit(duration_seconds, tone):
     word_limit = int((duration_seconds / 60) * 140)
+    bt = "`" * 3 # Prevent copy-paste breaking
     return f"""
     Act as a professional Burmese movie recapper. 
     Summarize this plot into a natural, engaging Burmese script.
     TONE: {tone}
     LENGTH: ~{word_limit} Burmese words.
-    FORMAT: Return the final Burmese script ONLY inside a markdown code block (```). 
+    FORMAT: Return the final Burmese script ONLY inside a markdown code block ({bt}). 
     No other text or explanations.
     """
 
@@ -170,12 +171,11 @@ if st.session_state.step == 1:
                             transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
                         limit = int((st.session_state.video_duration/60)*140)
                         
-                        # 🌟 ERROR FIXED HERE (Using f"""...""" Triple Quotes) 🌟
+                        bt = "`" * 3 # Prevent copy-paste breaking
                         st.session_state.ready_made_prompt = f"""Act as a professional movie recapper. Summarize this English transcription into a natural Burmese storytelling script.
 TONE: {tone_map[script_tone]}
 LENGTH: ~{limit} Burmese words.
-CRITICAL: Return the final Burmese script ONLY inside a markdown code block (
-```text ... ```) so I can copy it with one click. Do not include any extra text.
+CRITICAL: Return the final Burmese script ONLY inside a markdown code block ({bt}text ... {bt}) so I can copy it with one click. Do not include any extra text.
 
 Transcription:
 {transcription}"""
@@ -192,10 +192,12 @@ Transcription:
 # ==========================================
 elif st.session_state.step == 2:
     st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
+    bt = "`" * 3 # Safe backticks
+    
     if st.session_state.workflow_mode == "Auto":
         st.info("Copy ခလုတ်ကို နှိပ်၍ ဇာတ်ညွှန်းကို ကူးယူနိုင်ပါသည်။")
-        display_text = st.session_state.draft_script.replace("```text", "").replace("
-```markdown", "").replace("```", "").strip()
+        # Ensure no backticks mess up the display
+        display_text = st.session_state.draft_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
         st.code(display_text, language="markdown")
         edited_script = st.text_area("✍️ လိုအပ်ပါက ပြင်ဆင်ပါ:", value=display_text, height=300)
     else:
@@ -208,8 +210,7 @@ elif st.session_state.step == 2:
     if c2.button("🎙️ Next: Render"):
         if not edited_script.strip(): st.error("စာသားထည့်ပါ")
         else: 
-            clean_edited = edited_script.replace("```text", "").replace("
-```markdown", "").replace("```", "").strip()
+            clean_edited = edited_script.replace(f"{bt}text", "").replace(f"{bt}markdown", "").replace(bt, "").strip()
             st.session_state.final_script = clean_edited
             next_step()
             st.rerun()
