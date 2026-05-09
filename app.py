@@ -72,7 +72,8 @@ def reset_project():
     st.session_state.step = 1
     st.rerun()
 
-# --- AI Model Auto-Detector ---
+# --- 🌟 AI Model Auto-Detectors (Error ရှောင်ကွင်းစနစ်များ) 🌟 ---
+
 def get_best_gemini_model():
     try:
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -83,6 +84,34 @@ def get_best_gemini_model():
         return models[0] if models else "models/gemini-1.5-flash"
     except:
         return "models/gemini-1.5-flash"
+
+def get_best_groq_chat_model(client):
+    try:
+        models = client.models.list()
+        model_ids = [m.id for m in models.data]
+        # ဦးစားပေး ရှာဖွေမည့် Model အသစ်များ စာရင်း
+        for preferred in ["llama-3.1-8b-instant", "llama3-8b-8192", "llama-3.1-70b-versatile", "mixtral-8x7b-32768"]:
+            if preferred in model_ids:
+                return preferred
+        # အထက်ပါအရာများ မရှိပါက 'llama' ပါသော မည်သည့် model ကိုမဆို ယူမည်
+        for m in model_ids:
+            if "llama" in m.lower(): return m
+        return model_ids[0]
+    except:
+        return "llama-3.1-8b-instant" # Fallback
+
+def get_best_groq_whisper_model(client):
+    try:
+        models = client.models.list()
+        model_ids = [m.id for m in models.data]
+        for preferred in ["whisper-large-v3-turbo", "whisper-large-v3"]:
+            if preferred in model_ids:
+                return preferred
+        for m in model_ids:
+            if "whisper" in m.lower(): return m
+        return "whisper-large-v3"
+    except:
+        return "whisper-large-v3" # Fallback
 
 # --- 🌟 SMART HYBRID AI ENGINE 🌟 ---
 def generate_script_hybrid(audio_path, prompt_tone, target_duration, is_long):
@@ -111,21 +140,23 @@ def generate_script_hybrid(audio_path, prompt_tone, target_duration, is_long):
             
             # Step 2a: Whisper to Text
             st.write(">> 🟠 Groq AI (Whisper) ဖြင့် အသံအား စာသားပြောင်းနေပါသည်...")
+            best_whisper = get_best_groq_whisper_model(client)
             with open(audio_path, "rb") as file:
                 transcription = client.audio.transcriptions.create(
                   file=(audio_path, file.read()),
-                  model="whisper-large-v3",
+                  model=best_whisper,
                   response_format="text"
                 )
             eng_text = transcription
             
-            # Step 2b: Llama3 to Burmese Script
-            st.write(">> 🟠 Groq AI (Llama 3) ဖြင့် မြန်မာဇာတ်ညွှန်း ရေးသားနေပါသည်...")
+            # Step 2b: Llama to Burmese Script
+            st.write(">> 🟠 Groq AI (Llama) ဖြင့် မြန်မာဇာတ်ညွှန်း ရေးသားနေပါသည်...")
+            best_llama = get_best_groq_chat_model(client)
             llama_prompt = f"Translate and summarize the following English text into an engaging Burmese script for TikTok in a {prompt_tone} tone. Return ONLY the Burmese script. No markdown formatting. \n\nEnglish Text: {eng_text}"
             
             chat_completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": llama_prompt}],
-                model="llama3-8b-8192",
+                model=best_llama,
             )
             return chat_completion.choices[0].message.content
         else:
@@ -147,7 +178,7 @@ async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_f
 
 # --- UI Header ---
 st.markdown('<div class="main-title">🎬 Shorts Movie Recap (AI Free)</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Smart Hybrid AI Engine (Gemini + Groq Fallback)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Smart Hybrid AI Engine (Auto Model Scanner)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # WIZARD STEP 1: Setup & Media Input
@@ -222,7 +253,6 @@ if st.session_state.step == 1:
                 selected_tone = tone_map[script_tone]
                 
                 try:
-                    # Execute Hybrid Logic
                     final_draft = generate_script_hybrid("temp_audio.mp3", selected_tone, target_duration, is_long)
                     
                     st.session_state.draft_script = final_draft
