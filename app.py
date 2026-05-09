@@ -31,7 +31,7 @@ class StreamlitLogger(ProgressBarLogger):
             self.text_holder.markdown(f"**⏳ ဗီဒီယို ပေါင်းစပ်နေသည်... {percentage}% ပြီးစီးပါပြီ**")
 
 # --- Page Configuration ---
-st.set_page_config(page_title="AI Movie Recap Studio Pro", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="Shorts Movie Recap (AI Free)", page_icon="🎬", layout="centered")
 
 # --- Custom CSS ---
 st.markdown("""
