@@ -33,6 +33,17 @@ class StreamlitLogger(ProgressBarLogger):
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Free Recap Studio Pro", page_icon="🎬", layout="centered")
 
+# --- Custom CSS ---
+st.markdown("""
+    <style>
+    .main-title { font-size: 32px; font-weight: 800; color: #00E676; text-align: center; margin-bottom: 5px; }
+    .sub-title { text-align: center; color: #A0A0A0; font-size: 14px; margin-bottom: 30px; font-family: monospace;}
+    .step-header { color: #00E676; font-weight: bold; font-size: 20px; border-bottom: 1px solid #00E676; padding-bottom: 10px; margin-bottom: 20px; }
+    .stButton>button { background-color: #00E676; color: #111111; font-weight: bold; border-radius: 8px; width: 100%; transition: 0.3s; }
+    .stButton>button:hover { background-color: #B2FF59; color: #000000; }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Persistent API Storage ---
 API_FILE = "api_config.json"
 def load_keys():
@@ -52,127 +63,268 @@ if 'video_duration' not in st.session_state: st.session_state.video_duration = 0
 for k, v in saved_keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
+def next_step(): st.session_state.step += 1
+def prev_step(): st.session_state.step -= 1
+
 def reset_project():
     gc.collect()
     for f in ["temp_video.mp4", "temp_audio.mp3", "final_voice.mp3", "final_merged.mp4", "subtitles.srt", "custom_bgm.mp3"]:
         try:
             if os.path.exists(f): os.remove(f)
         except: pass
+    keys_to_keep = {k: st.session_state[k] for k in saved_keys}
+    st.session_state.clear()
+    for k, v in keys_to_keep.items(): st.session_state[k] = v
     st.session_state.step = 1
     st.rerun()
 
 # --- 🌟 SMART DURATION SCRIPT LOGIC 🌟 ---
 def get_prompt_with_limit(duration_seconds, tone):
-    # မြန်မာစကားပြောနှုန်း တစ်မိနစ် ၁၄၀ လုံး အကြမ်းဖျဉ်းတွက်ချက်ခြင်း
     duration_minutes = duration_seconds / 60
-    word_limit = int(duration_minutes * 140)
+    word_limit = int(duration_minutes * 140) # မြန်မာစကားပြောနှုန်း ၁ မိနစ်လျှင် ၁၄၀ လုံးခန့်
     
     return f"""
     Act as a professional Burmese movie recapper. 
-    Summarize this video/audio into a natural Burmese storytelling script.
+    Listen to this audio (auto-detect language) and summarize the plot into a natural Burmese storytelling script for TikTok.
     TONE: {tone}
-    TARGET LENGTH: Exactly around {word_limit} Burmese words (to fit {duration_minutes:.1f} minutes of speaking time).
-    CRITICAL: Do NOT exceed {word_limit + 20} words. Keep it concise and engaging.
-    Return ONLY the Burmese script.
+    TARGET LENGTH: Exactly around {word_limit} Burmese words (to perfectly fit {duration_minutes:.1f} minutes of speaking time).
+    CRITICAL INSTRUCTION: Do NOT exceed {word_limit + 20} words. Keep it concise, engaging, and emotional.
+    Return ONLY the Burmese script without any markdown formatting.
     """
 
+def get_manual_prompt_with_limit(eng_transcription, tone, duration_seconds):
+    duration_minutes = duration_seconds / 60
+    word_limit = int(duration_minutes * 140)
+    
+    return f"""Act as a professional movie recapper. Translate and summarize this English transcription into a natural, engaging Burmese storytelling script. 
+Use a {tone} tone.
+TARGET LENGTH: Around {word_limit} Burmese words to fit a {duration_minutes:.1f} minute video.
+Return ONLY the Burmese text without markdown.
+
+English Transcription:
+{eng_transcription}"""
+
 # --- AI Executors ---
+def get_best_gemini_model():
+    try:
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        for m in models:
+            if "1.5-flash" in m: return m
+        return models[0] if models else "models/gemini-1.5-flash"
+    except: return "models/gemini-1.5-flash"
+
 def execute_gemini_smart(audio_path, tone, duration):
     active_keys = [st.session_state[k] for k in ["gemini_1", "gemini_2", "gemini_3"] if st.session_state[k].strip()]
-    if not active_keys: raise Exception("API Key လိုအပ်ပါသည်။")
+    if not active_keys: raise Exception("Gemini API Key အနည်းဆုံး တစ်ခု လိုအပ်ပါသည်။")
     
     prompt = get_prompt_with_limit(duration, tone)
     
     for idx, key in enumerate(active_keys):
         try:
+            st.write(f">> 🟢 Gemini Key {idx+1} ဖြင့် ချိတ်ဆက်နေပါသည်...")
             genai.configure(api_key=key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel(get_best_gemini_model())
             audio_file = genai.upload_file(path=audio_path)
             response = model.generate_content([prompt, audio_file])
             return response.text
         except Exception as e:
-            if "429" in str(e) and idx < len(active_keys) - 1: continue
+            if "429" in str(e) or "Quota" in str(e):
+                if idx < len(active_keys) - 1: continue
+                else: raise Exception("Gemini Keys အားလုံး Limit ပြည့်သွားပါပြီ။")
             else: raise e
 
-# --- UI ---
-st.markdown('<h1 style="color:#00E676;text-align:center;">🎬 AI Recap Studio Pro</h1>', unsafe_allow_html=True)
+# --- TTS Helper ---
+async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_filename):
+    communicate = edge_tts.Communicate(text, voice_name)
+    submaker = edge_tts.SubMaker()
+    with open(audio_filename, "wb") as file:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                if hasattr(submaker, 'feed'): submaker.feed(chunk)
+                else: submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+    with open(srt_filename, "w", encoding="utf-8") as file:
+        if hasattr(submaker, 'get_srt'): file.write(submaker.get_srt())
+        else: file.write(submaker.generate_subs())
 
+# --- UI Header ---
+st.markdown('<div class="main-title">🎬 AI Free Recap Studio</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Auto-Duration Sync | Hybrid Workflow | Copyright Pro</div>', unsafe_allow_html=True)
+
+# ==========================================
+# WIZARD STEP 1: Settings & Media
+# ==========================================
 if st.session_state.step == 1:
-    with st.expander("⚙️ API Key Settings"):
-        st.session_state.gemini_1 = st.text_input("Gemini Key 1", type="password", value=st.session_state.gemini_1)
-        st.session_state.groq_1 = st.text_input("Groq Key", type="password", value=st.session_state.groq_1)
-        if st.button("💾 Save Keys"): save_keys({k: st.session_state[k] for k in saved_keys}); st.success("Saved!")
-
-    uploaded_file = st.file_uploader("ဗီဒီယိုတင်ပါ", type=["mp4", "mov"])
+    st.markdown('<div class="step-header">Step 1: AI Setup & Media Source</div>', unsafe_allow_html=True)
     
-    col1, col2 = st.columns(2)
-    tone = col1.selectbox("ပြောဟန် ရွေးပါ", ["Narrative (ဇာတ်လမ်းပြောဟန်)", "Dramatic (ခံစားချက်အပြည့်)", "Energetic (တက်တက်ကြွကြွ)"])
-    workflow = col2.radio("လုပ်ငန်းစဉ်", ["Auto (Gemini)", "Manual (Groq)"])
+    with st.expander("⚙️ API Key Settings (Auto-Saved)", expanded=False):
+        col_g1, col_g2, col_g3 = st.columns(3)
+        st.session_state.gemini_1 = col_g1.text_input("Gemini Key 1", type="password", value=st.session_state.gemini_1)
+        st.session_state.gemini_2 = col_g2.text_input("Gemini Key 2", type="password", value=st.session_state.gemini_2)
+        st.session_state.gemini_3 = col_g3.text_input("Gemini Key 3", type="password", value=st.session_state.gemini_3)
+        st.session_state.groq_1 = st.text_input("Groq Key (Manual Mode Only)", type="password", value=st.session_state.groq_1)
+        if st.button("💾 API Keys သိမ်းမည်"):
+            save_keys({k: st.session_state[k] for k in saved_keys})
+            st.success("API Keys များအား config.json တွင် သိမ်းဆည်းပြီးပါပြီ!")
 
-    if st.button("🚀 Next: Generate Script") and uploaded_file:
-        with open("temp_video.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
-        with st.spinner("Analyzing Video..."):
-            clip = VideoFileClip("temp_video.mp4")
-            st.session_state.video_duration = clip.duration
-            clip.audio.write_audiofile("temp_audio.mp3", logger=None)
-            clip.close()
-            
-            try:
-                if "Auto" in workflow:
-                    st.session_state.draft_script = execute_gemini_smart("temp_audio.mp3", tone, st.session_state.video_duration)
-                    st.session_state.workflow_mode = "Auto"
-                else:
-                    client = Groq(api_key=st.session_state.groq_1)
-                    with open("temp_audio.mp3", "rb") as f:
-                        transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
-                    # Manual Prompt with Word Limit
-                    limit = int((st.session_state.video_duration/60)*140)
-                    st.session_state.ready_made_prompt = f"Summarize this into Burmese ({tone}) around {limit} words:\n\n{transcription}"
-                    st.session_state.workflow_mode = "Manual"
-                
-                st.session_state.step = 2
-                st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
-
-elif st.session_state.step == 2:
-    st.markdown("### Step 2: Script Editor")
-    if st.session_state.workflow_mode == "Auto":
-        # 🌟 Copy Box (Code Block) စနစ်ဖြင့် ပြသခြင်း 🌟
-        st.info("အောက်က Box ထဲမှာ ကလစ်နှိပ်ပြီး ဇာတ်ညွှန်းကို Copy ကူးနိုင်ပါတယ်။")
-        st.code(st.session_state.draft_script, language="markdown")
-        edited_script = st.text_area("✍️ လိုအပ်တာ ပြင်ဆင်ပါ -", value=st.session_state.draft_script, height=300)
+    st.markdown("### 📥 Media Source")
+    input_method = st.radio("ရွေးချယ်ရန်:", ["Upload Video", "YouTube Link"], horizontal=True, label_visibility="collapsed")
+    if input_method == "Upload Video":
+        uploaded_file = st.file_uploader("ဗီဒီယိုဖိုင် ရွေးပါ", type=["mp4", "mov"])
+        if uploaded_file:
+            with open("temp_video.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
+            st.success("Video Uploaded Successfully!")
     else:
+        youtube_url = st.text_input("Paste YouTube Link Here")
+        if st.button("⬇️ Download Video"):
+            with st.spinner("Downloading..."):
+                try:
+                    ydl_opts = {'format': 'best[height<=720]', 'outtmpl': 'temp_video.mp4', 'quiet': True}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([youtube_url])
+                    st.success("Download Complete!")
+                except Exception as e: st.error(f"Error: {e}")
+
+    st.markdown("### 🎛️ Preferences")
+    col1, col2 = st.columns(2)
+    with col1:
+        workflow = st.radio("🔄 လုပ်ငန်းစဉ် ရွေးချယ်ရန်", ["Auto Mode (Direct to Burmese via Gemini)", "Manual Mode (English Script via Groq)"])
+        script_tone = st.selectbox("📝 ဇာတ်ညွှန်း ပြောဟန် (Tone)", ["Narrative (ဇာတ်လမ်းပြောဟန်)", "Calm (အေးအေးဆေးဆေး)", "Energetic (တက်တက်ကြွကြွ)", "Dramatic (ခံစားချက်အပြည့်)"])
+        use_bgm = st.checkbox("🎶 နောက်ခံတီးလုံး (BGM) ထည့်မည်", value=True)
+    with col2:
+        tts_engine = st.selectbox("🎙️ Voice Engine", ["Premium (Nilar/Thiha)", "Standard (gTTS)"])
+        voice_gender = st.selectbox("🗣️ Premium Voice အသံ", ["Female (Nilar)", "Male (Thiha)"]) if "Premium" in tts_engine else "None"
+        st.info("⏱️ ဇာတ်ညွှန်းအရှည်ကို ဗီဒီယိုအချိန်နှင့် အလိုအလျောက် ချိန်ညှိပေးပါမည်။")
+
+    custom_bgm_file = st.file_uploader("📂 ကိုယ်ပိုင်တီးလုံးတင်ရန် (မဖြစ်မနေမဟုတ်ပါ)", type=["mp3"])
+    if custom_bgm_file:
+        with open("custom_bgm.mp3", "wb") as f: f.write(custom_bgm_file.getbuffer())
+
+    if st.button("🚀 Next: Generate Script"):
+        if not os.path.exists("temp_video.mp4"): st.error("⚠️ ဗီဒီယို အရင်တင်ပါ။")
+        else:
+            with st.spinner("Processing Video & AI Request..."):
+                video_clip = VideoFileClip("temp_video.mp4")
+                st.session_state.video_duration = video_clip.duration
+                video_clip.audio.write_audiofile("temp_audio.mp3", logger=None)
+                video_clip.close()
+                gc.collect()
+                
+                tone_map = {"Narrative (ဇာတ်လမ်းပြောဟန်)": "narrative storytelling", "Calm (အေးအေးဆေးဆေး)": "calm and relaxing", "Energetic (တက်တက်ကြွကြွ)": "highly energetic and enthusiastic", "Dramatic (ခံစားချက်အပြည့်)": "intensely dramatic and emotional"}
+                selected_tone = tone_map[script_tone]
+                
+                try:
+                    if "Auto Mode" in workflow:
+                        draft = execute_gemini_smart("temp_audio.mp3", selected_tone, st.session_state.video_duration)
+                        st.session_state.draft_script = draft
+                        st.session_state.workflow_mode = "Auto"
+                    else:
+                        client = Groq(api_key=st.session_state.groq_1)
+                        st.write(">> 🟠 Groq (Whisper) ဖြင့် အသံအား စာသားပြောင်းနေပါသည်...")
+                        with open("temp_audio.mp3", "rb") as f:
+                            transcription = client.audio.transcriptions.create(file=("temp_audio.mp3", f.read()), model="whisper-large-v3", response_format="text")
+                        
+                        st.session_state.ready_made_prompt = get_manual_prompt_with_limit(transcription, selected_tone, st.session_state.video_duration)
+                        st.session_state.workflow_mode = "Manual"
+                        st.session_state.draft_script = ""
+                    
+                    st.session_state.use_bgm = use_bgm
+                    st.session_state.script_tone = script_tone
+                    st.session_state.tts_engine = tts_engine
+                    st.session_state.voice_gender = voice_gender
+                    next_step()
+                    st.rerun()
+                except Exception as e: st.error(f"Error: {e}")
+
+# ==========================================
+# WIZARD STEP 2: Editor
+# ==========================================
+elif st.session_state.step == 2:
+    st.markdown('<div class="step-header">Step 2: Script Editor</div>', unsafe_allow_html=True)
+    
+    if st.session_state.workflow_mode == "Auto":
+        st.info("💡 ညာဘက်အပေါ်ထောင့်ရှိ 'Copy' ခလုတ်ကို နှိပ်၍ ဇာတ်ညွှန်းကို ကူးယူနိုင်ပါသည်။")
+        st.code(st.session_state.draft_script, language="markdown")
+        edited_script = st.text_area("✍️ လိုအပ်ပါက အောက်တွင် ပြင်ဆင်ပါ:", value=st.session_state.draft_script, height=300)
+    else:
+        st.warning("💡 Manual Mode: အောက်ပါ Box ညာဘက်အပေါ်ရှိ 'Copy' ကိုနှိပ်၍ Gemini တွင် ဘာသာပြန်ပါ။")
         st.code(st.session_state.ready_made_prompt, language="text")
-        edited_script = st.text_area("✍️ ဘာသာပြန်ထားတာ ထည့်ပါ -", height=300)
+        edited_script = st.text_area("✍️ Paste your translated Burmese Script here:", value=st.session_state.draft_script, height=300)
 
     col1, col2 = st.columns(2)
-    if col1.button("⬅️ Back"): st.session_state.step = 1; st.rerun()
-    if col2.button("🎙️ Next: Render Video"):
-        st.session_state.final_script = edited_script
-        st.session_state.step = 3
-        st.rerun()
+    with col1:
+        if st.button("⬅️ Back"): prev_step(); st.rerun()
+    with col2:
+        if st.button("🎙️ Next: Render Video"):
+            if not edited_script.strip(): st.error("⚠️ မြန်မာ ဇာတ်ညွှန်း လိုအပ်ပါသည်။")
+            else:
+                st.session_state.final_script = edited_script
+                next_step(); st.rerun()
 
+# ==========================================
+# WIZARD STEP 3: Final Export
+# ==========================================
 elif st.session_state.step == 3:
-    with st.spinner("Rendering Final Video..."):
+    st.markdown('<div class="step-header">Step 3: Processing Output</div>', unsafe_allow_html=True)
+    
+    with st.spinner("Generating Voice & Syncing Video..."):
         try:
-            asyncio.run(edge_tts.Communicate(st.session_state.final_script, "my-MM-NilarNeural").save("final_voice.mp3"))
+            clean_script = st.session_state.final_script.replace("*", "")
+            has_srt = False
             
-            video = VideoFileClip("temp_video.mp4")
-            audio = AudioFileClip("final_voice.mp3")
+            # Text to Speech
+            if "Premium" in st.session_state.tts_engine:
+                voice_id = "my-MM-NilarNeural" if "Nilar" in st.session_state.voice_gender else "my-MM-ThihaNeural"
+                asyncio.run(generate_premium_voice_and_srt(clean_script, voice_id, "final_voice.mp3", "subtitles.srt"))
+                has_srt = True
+            else:
+                gTTS(text=clean_script, lang='my').save("final_voice.mp3")
             
-            # 🌟 Sync Logic: ဗီဒီယိုကို အသံနဲ့အညီ အမြန်နှုန်းချိန်ညှိခြင်း 🌟
-            final_video = video.speedx(factor=video.duration/audio.duration).set_audio(audio)
-            
-            # Copyright FX
+            # Video Processing (Speed Sync & Copyright FX)
             import moviepy.video.fx.all as vfx
-            w, h = final_video.size
-            final_video = final_video.fx(vfx.mirror_x).crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+            import moviepy.audio.fx.all as afx
+            
+            video_clip = VideoFileClip("temp_video.mp4")
+            voice_audio = AudioFileClip("final_voice.mp3")
+            
+            # 🌟 အသံနှင့် ရုပ် အချိန်တိကျစေရန် Speed Sync ပြုလုပ်ခြင်း 🌟
+            speed_factor = video_clip.duration / voice_audio.duration
+            processed_video = video_clip.speedx(factor=speed_factor).fx(vfx.mirror_x)
+            
+            w, h = processed_video.size
+            processed_video = processed_video.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+            processed_video = processed_video.resize(height=720).fx(vfx.colorx, 1.05)
+            
+            final_audio = voice_audio
+            if st.session_state.use_bgm:
+                bgm_name = st.session_state.script_tone.split(" ")[0].lower()
+                bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/{bgm_name}.mp3"
+                
+                if os.path.exists(bgm_path):
+                    bgm = AudioFileClip(bgm_path).fx(afx.volumex, 0.12).set_duration(voice_audio.duration)
+                    final_audio = CompositeAudioClip([voice_audio.set_start(0), bgm.set_start(0)])
+
+            final_video = processed_video.set_audio(final_audio)
             
             my_logger = StreamlitLogger()
             final_video.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=my_logger)
             
-            st.success("ပြီးပါပြီ!")
+            video_clip.close()
+            voice_audio.close()
+            final_video.close()
+            gc.collect()
+            
+            st.success("🎉 ဗီဒီယို အောင်မြင်စွာ ပေါင်းစပ်ပြီးပါပြီ!")
             st.video("final_merged.mp4")
-            st.download_button("📥 Download", data=open("final_merged.mp4", "rb"), file_name="Final_Recap.mp4")
-            if st.button("🔄 New Project"): reset_project()
-        except Exception as e: st.error(f"Render Error: {e}")
+            
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download Video", data=f, file_name="Final_Recap.mp4", mime="video/mp4")
+            if has_srt and os.path.exists("subtitles.srt"):
+                with col_f2:
+                    with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT", data=f, file_name="Subs.srt", mime="text/plain")
+                    
+            st.markdown("---")
+            if st.button("🔄 New Project (Reset)"): reset_project()
+            
+        except Exception as e:
+            st.error(f"Processing Error: {e}")
