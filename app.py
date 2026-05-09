@@ -7,7 +7,10 @@ import google.generativeai as genai
 import edge_tts
 import yt_dlp
 from gtts import gTTS
-from moviepy import VideoFileClip, AudioFileClip, concatenate_audioclips, afx
+from moviepy import VideoFileClip, AudioFileClip
+from moviepy.audio.AudioClip import CompositeAudioClip
+import moviepy.audio.fx.all as afx
+import moviepy.video.fx.all as vfx
 from proglog import ProgressBarLogger
 
 # --- Custom Logger for Streamlit Progress Bar ---
@@ -59,6 +62,18 @@ def reset_project():
     st.session_state.api_key = saved_key # Key ကိုတော့ ပြန်မှတ်ထားပေးမည်
     st.session_state.step = 1
     st.rerun()
+
+# --- AI Model Auto-Detector (To fix NotFound Error) ---
+def get_best_gemini_model():
+    try:
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        for m in models:
+            if "1.5-flash" in m: return m
+        for m in models:
+            if "1.5-pro" in m: return m
+        return models[0] if models else "models/gemini-1.5-flash"
+    except:
+        return "models/gemini-1.5-flash" # Fallback
 
 # --- Helpers ---
 async def generate_premium_voice_and_srt(text, voice_name, audio_filename, srt_filename):
@@ -113,11 +128,16 @@ if st.session_state.step == 1:
     st.markdown("### 🎛️ Advanced Settings")
     col1, col2 = st.columns(2)
     with col1:
-        script_tone = st.selectbox("📝 Script Tone", ["Narrative", "Calm", "Energetic", "Dramatic"])
+        # 🌟 ဇာတ်ညွှန်းပုံစံ (၄) မျိုး ပြန်လည်ထည့်သွင်းခြင်း 🌟
+        script_tone = st.selectbox("📝 ဇာတ်ညွှန်း ပြောဟန် (Script Tone)", ["Narrative (ဇာတ်လမ်းပြောဟန်)", "Calm (အေးအေးဆေးဆေး)", "Energetic (တက်တက်ကြွကြွ)", "Dramatic (ခံစားချက်အပြည့်)"])
         use_bgm = st.checkbox("🎶 နောက်ခံတီးလုံး (BGM) ထည့်မည်", value=True)
     with col2:
         tts_engine = st.selectbox("🎙️ Voice Engine", ["Premium (Nilar/Thiha)", "Standard (gTTS)"])
         target_duration = st.selectbox("⏳ အနှစ်ချုပ်မည့်အချိန် (Long Video များအတွက်)", ["3 Minutes", "4 Minutes", "5 Minutes"])
+        if "Premium" in tts_engine:
+            voice_gender = st.selectbox("🗣️ Premium Voice အသံ", ["Female (Nilar)", "Male (Thiha)"])
+        else:
+            voice_gender = "None"
 
     # Custom BGM Option
     custom_bgm_file = st.file_uploader("📂 ကိုယ်ပိုင်တီးလုံးတင်ရန် (မဖြစ်မနေမဟုတ်ပါ)", type=["mp3"])
@@ -128,25 +148,43 @@ if st.session_state.step == 1:
         if not st.session_state.api_key: st.error("⚠️ API Key လိုအပ်ပါသည်။")
         elif not os.path.exists("temp_video.mp4"): st.error("⚠️ ဗီဒီယို အရင်တင်ပါ။")
         else:
-            with st.spinner("Analyzing Video..."):
+            with st.spinner("Analyzing Video & Auto-Detecting AI Model..."):
                 genai.configure(api_key=st.session_state.api_key)
+                
+                # Model Auto-Detect
+                best_model_name = get_best_gemini_model()
+                model = genai.GenerativeModel(best_model_name)
+                
                 video_clip = VideoFileClip("temp_video.mp4")
                 video_clip.audio.write_audiofile("temp_audio.mp3", logger=None)
                 is_long = video_clip.duration > 300
                 video_clip.close()
                 
-                model = genai.GenerativeModel("gemini-1.5-flash")
                 audio_file = genai.upload_file(path="temp_audio.mp3")
-                prompt = f"Summarize this movie in a {script_tone} Burmese script for TikTok. {'Target duration: ' + target_duration if is_long else 'Match original video length.'} No markdown."
-                response = model.generate_content([prompt, audio_file])
                 
-                st.session_state.draft_script = response.text
-                st.session_state.is_long_video = is_long
-                st.session_state.use_bgm = use_bgm
-                st.session_state.script_tone = script_tone
-                st.session_state.tts_engine = tts_engine
-                next_step()
-                st.rerun()
+                # 🌟 Tone Map Logic 🌟
+                tone_map = {
+                    "Narrative (ဇာတ်လမ်းပြောဟန်)": "narrative storytelling",
+                    "Calm (အေးအေးဆေးဆေး)": "calm and relaxing",
+                    "Energetic (တက်တက်ကြွကြွ)": "highly energetic and enthusiastic",
+                    "Dramatic (ခံစားချက်အပြည့်)": "intensely dramatic and emotional"
+                }
+                selected_tone = tone_map[script_tone]
+                
+                prompt = f"Summarize this movie plot into an engaging Burmese script for TikTok in a {selected_tone} tone. {'Target exactly ' + target_duration.split()[0] + ' minutes to read.' if is_long else 'Match original video length.'} Focus only on the main storyline. No markdown."
+                
+                try:
+                    response = model.generate_content([prompt, audio_file])
+                    st.session_state.draft_script = response.text
+                    st.session_state.is_long_video = is_long
+                    st.session_state.use_bgm = use_bgm
+                    st.session_state.script_tone = script_tone
+                    st.session_state.tts_engine = tts_engine
+                    st.session_state.voice_gender = voice_gender
+                    next_step()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"AI Error: {e} - (API Key ကို ပြန်လည်စစ်ဆေးပါ)")
 
 # ==========================================
 # WIZARD STEP 2: Editor
@@ -172,8 +210,12 @@ elif st.session_state.step == 3:
         try:
             # 1. Voice Generation
             clean_script = st.session_state.final_script.replace("*", "")
+            has_srt = False
+            
             if "Premium" in st.session_state.tts_engine:
-                asyncio.run(generate_premium_voice_and_srt(clean_script, "my-MM-NilarNeural", "final_voice.mp3", "subtitles.srt"))
+                voice_id = "my-MM-NilarNeural" if "Nilar" in st.session_state.voice_gender else "my-MM-ThihaNeural"
+                asyncio.run(generate_premium_voice_and_srt(clean_script, voice_id, "final_voice.mp3", "subtitles.srt"))
+                has_srt = True
             else:
                 gTTS(text=clean_script, lang='my').save("final_voice.mp3")
             
@@ -181,34 +223,65 @@ elif st.session_state.step == 3:
             if st.session_state.is_long_video:
                 st.success("Long Video အား အနှစ်ချုပ် အသံဖိုင် ထုတ်ပေးပြီးပါပြီ!")
                 st.audio("final_voice.mp3")
+                col_dl1, col_dl2 = st.columns(2)
+                with col_dl1:
+                    with open("final_voice.mp3", "rb") as f: st.download_button("🎙️ Download Audio Only", data=f, file_name="Recap_Audio.mp3", mime="audio/mp3")
+                if has_srt:
+                    with col_dl2:
+                        with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT File", data=f, file_name="Subs.srt", mime="text/plain")
             else:
                 video_clip = VideoFileClip("temp_video.mp4")
                 voice_audio = AudioFileClip("final_voice.mp3")
                 
-                # Copyright FX
-                import moviepy.video.fx.all as vfx
+                # Copyright FX (Mirror, Crop, Speed, Color)
                 processed_video = video_clip.speedx(factor=video_clip.duration/voice_audio.duration).fx(vfx.mirror_x)
                 w, h = processed_video.size
-                processed_video = processed_video.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97).resize(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
+                
+                if hasattr(processed_video, 'cropped'):
+                    processed_video = processed_video.cropped(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+                else:
+                    processed_video = processed_video.crop(x1=w*0.03, y1=h*0.03, x2=w*0.97, y2=h*0.97)
+                
+                if hasattr(processed_video, 'resized'):
+                    processed_video = processed_video.resized(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
+                else:
+                    processed_video = processed_video.resize(height=720).fx(vfx.colorx, 1.05).fx(vfx.speedx, 1.01)
                 
                 # BGM Mixing
                 final_audio = voice_audio
                 if st.session_state.use_bgm:
-                    bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/{st.session_state.script_tone.lower()}.mp3"
+                    bgm_name = st.session_state.script_tone.split(" ")[0].lower() # e.g., "narrative"
+                    bgm_path = "custom_bgm.mp3" if os.path.exists("custom_bgm.mp3") else f"bgm/{bgm_name}.mp3"
+                    
                     if os.path.exists(bgm_path):
-                        bgm = AudioFileClip(bgm_path).volumex(0.12).set_duration(voice_audio.duration)
-                        final_audio = concatenate_audioclips([voice_audio.set_start(0), bgm.set_start(0)]) # Placeholder for mixing logic
-                        # Real mixing: final_audio = CompositeAudioClip([voice_audio, bgm])
-                        from moviepy.audio.AudioClip import CompositeAudioClip
-                        final_audio = CompositeAudioClip([voice_audio, bgm])
+                        # Use afx.volumex to ensure compatibility
+                        bgm = AudioFileClip(bgm_path).fx(afx.volumex, 0.12).set_duration(voice_audio.duration)
+                        final_audio = CompositeAudioClip([voice_audio.set_start(0), bgm.set_start(0)])
 
                 final_video = processed_video.set_audio(final_audio)
+                
+                # Render using Logger
                 my_logger = StreamlitLogger()
                 final_video.write_videofile("final_merged.mp4", codec="libx264", audio_codec="aac", threads=2, logger=my_logger)
                 
-                st.success("ဗီဒီယို ပေါင်းစပ်ခြင်း ပြီးစီးပါပြီ!")
+                video_clip.close()
+                voice_audio.close()
+                final_video.close()
+                gc.collect()
+                
+                my_logger.text_holder.markdown("**✅ ဗီဒီယို ပေါင်းစပ်ခြင်း ၁၀၀% ပြီးစီးပါပြီ!**")
+                st.success("🎉 Copyright-Safe ဗီဒီယို အောင်မြင်စွာ ပေါင်းစပ်ပြီးပါပြီ!")
                 st.video("final_merged.mp4")
-            
+                
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    with open("final_merged.mp4", "rb") as f: st.download_button("📥 Download Safe Video", data=f, file_name="AI_Free_Merged.mp4", mime="video/mp4")
+                if has_srt and os.path.exists("subtitles.srt"):
+                    with col_f2:
+                        with open("subtitles.srt", "rb") as f: st.download_button("📝 Download SRT File", data=f, file_name="AI_Free_Subs.srt", mime="text/plain")
+                        
             st.markdown("---")
             if st.button("🔄 New Project (Reset)"): reset_project()
-        except Exception as e: st.error(f"Error: {e}")
+            
+        except Exception as e:
+            st.error(f"Processing Error: {e}")
