@@ -1,9 +1,4 @@
 streamlit
-moviepy==1.0.3
+faster-whisper
 google-generativeai
-groq
 edge-tts
-yt-dlp
-gtts
-proglog
-imageio-ffmpeg
